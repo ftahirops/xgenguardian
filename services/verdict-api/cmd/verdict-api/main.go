@@ -29,6 +29,7 @@ import (
 	"github.com/xgenguardian/services/verdict-api/internal/httpgw"
 	"github.com/xgenguardian/services/verdict-api/internal/oauthreg"
 	"github.com/xgenguardian/services/verdict-api/internal/rdap"
+	"github.com/xgenguardian/services/verdict-api/internal/brandgraph"
 	"github.com/xgenguardian/services/verdict-api/internal/registry"
 )
 
@@ -76,6 +77,17 @@ func main() {
 	brandsCache := registry.New(pg)
 	if err := brandsCache.Start(ctx, 5*time.Minute); err != nil {
 		log.Warn().Err(err).Msg("brand registry initial load failed; starting empty")
+	}
+
+	// Brand-relationship graph (action-scoped trust): replaces flat trustreg
+	// hostname matching with (host, scope) edges loaded from brand_hosts.
+	// On Postgres failure, brandgraph falls back to its in-process stub.
+	if bgStore, err := brandgraph.NewStore(ctx, pg); err != nil {
+		log.Warn().Err(err).Msg("brand_hosts initial load failed; falling back to stub")
+	} else {
+		brandgraph.SetStore(bgStore)
+		ex, sfx := bgStore.Stats()
+		log.Info().Int("exact", ex).Int("suffix", sfx).Msg("brandgraph hydrated")
 	}
 
 	// RDAP corroborator — populates fusion.Inputs.DomainAge so the third

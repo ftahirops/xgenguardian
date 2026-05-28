@@ -554,3 +554,14 @@ func BrandFor(host string) string {
 
 // Size returns the number of registered exact hosts. For diagnostics.
 func Size() int { return len(hostMatchSet) }
+
+// Entries returns the curated registry data — used by the one-shot
+// trustreg-to-brandgraph migrator (tools/trustreg-to-brandgraph) to seed
+// the brand_hosts table. The slice is a shallow copy so callers can't
+// mutate the live registry. Pre-existing callers should NOT use this —
+// they should call IsTrusted / BrandFor.
+func Entries() []Entry {
+	out := make([]Entry, len(registry))
+	copy(out, registry)
+	return out
+}

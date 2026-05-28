@@ -56,16 +56,20 @@ type Match struct {
 //   - any other edge matches only the requested scope
 //   - host_pattern can be exact or `*.suffix.example`
 //
-// SCAFFOLD: today this delegates to a stub that uses the existing trustreg.
-// When the brand_hosts table is loaded, the implementation here switches
-// to the Postgres-backed cache.
+// When a Postgres-backed Store has been wired via SetStore(), Trust()
+// consults that. Otherwise it falls back to the in-process stub maps
+// below (kept for tests and for the first-boot path before brands have
+// been seeded).
 func Trust(host string, scope Scope) Match {
+	if s := liveStore(); s != nil {
+		if m := s.trust(host, scope); m.Brand != "" {
+			return m
+		}
+	}
 	h := normalize(host)
 	if h == "" {
 		return Match{}
 	}
-	// Scaffold path: delegate to in-process backfill table. Real impl
-	// will load brand_hosts on startup + on-demand refresh.
 	if m, ok := stubLookup[h]; ok {
 		// full-trust matches any scope
 		if m.Scope == ScopeFullTrust {
@@ -90,6 +94,9 @@ func Trust(host string, scope Scope) Match {
 // existing trustreg.IsTrusted(host) call sites can switch with one-line
 // edits while we work out scope semantics per call site.
 func IsAnyTrust(host string) bool {
+	if s := liveStore(); s != nil && s.isAnyTrust(host) {
+		return true
+	}
 	h := normalize(host)
 	if h == "" {
 		return false
@@ -108,6 +115,11 @@ func IsAnyTrust(host string) bool {
 // BrandFor — returns the canonical brand name for any-scope match. Useful
 // for log lines and report-page rendering. Empty when no edge matches.
 func BrandFor(host string) string {
+	if s := liveStore(); s != nil {
+		if b := s.brandFor(host); b != "" {
+			return b
+		}
+	}
 	h := normalize(host)
 	if m, ok := stubLookup[h]; ok {
 		return m.Brand
