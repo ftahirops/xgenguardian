@@ -1,6 +1,6 @@
 const defaults = {
-  apiBase: "https://api.xgenguardian.com",
-  portalApiBase: "https://api.xgenguardian.com",
+  apiBase: "http://135.181.79.11:18080",
+  portalApiBase: "http://135.181.79.11:18081",
   enabled: true,
   enforceWarn: false,
   telemetry: true,

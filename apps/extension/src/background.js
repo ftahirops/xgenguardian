@@ -13,7 +13,9 @@
 // URL SHA-256. ALLOW entries TTL 5 min, BLOCK entries TTL 1 h. Sensitive URLs
 // are never cached.
 
-const DEFAULT_API   = "https://api.xgenguardian.com";
+// Operator's VPS — UFW restricts inbound 18080 to trusted IPs only.
+// Override via the Options page when running against a different deployment.
+const DEFAULT_API   = "http://135.181.79.11:18080";
 const ALLOW_TTL_MS  = 5 * 60 * 1000;
 const BLOCK_TTL_MS  = 60 * 60 * 1000;
 const VERDICT_TIMEOUT_MS = 4000;
