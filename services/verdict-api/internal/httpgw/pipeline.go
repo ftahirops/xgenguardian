@@ -499,15 +499,29 @@ type formExtract struct {
 // on real phishing infra are transient: TLS handshake aborts, slow DNS via
 // DoH, MinIO upload races. A single retry recovers most of them without
 // hammering healthy sites.
+//
+// Coalescing: concurrent callers for the same normalized URL share a single
+// underlying sandbox call. This prevents N simultaneous renders of the
+// same URL under fp-bench / extension burst load. See coalesce.go.
 func (s *Server) callSandboxWithRetry(ctx context.Context, target string) (*renderResponse, error) {
+	s.sandboxCoalescerOnce.Do(func() {
+		s.sandboxCoalescer = newCoalescer()
+	})
+	key := normalizeURLForCoalesce(target)
+	return s.sandboxCoalescer.do(ctx, key, func() (*renderResponse, error) {
+		return s.callSandboxWithRetryUncoalesced(ctx, target)
+	})
+}
+
+// callSandboxWithRetryUncoalesced — the actual retry logic, separated so
+// the coalescer can wrap it. Callers should use callSandboxWithRetry.
+func (s *Server) callSandboxWithRetryUncoalesced(ctx context.Context, target string) (*renderResponse, error) {
 	t2ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	r, err := s.callSandbox(t2ctx, target)
 	cancel()
 	if err == nil && r != nil && r.ScreenshotURL != "" {
 		return r, nil
 	}
-	// Retry with a fresh budget. Don't retry if the outer ctx is already
-	// cancelled (caller gave up).
 	if ctx.Err() != nil {
 		return r, err
 	}
@@ -517,7 +531,6 @@ func (s *Server) callSandboxWithRetry(ctx context.Context, target string) (*rend
 	if err2 == nil && r2 != nil && r2.ScreenshotURL != "" {
 		return r2, nil
 	}
-	// Return the better of the two outcomes (prefer first if both failed).
 	if r != nil {
 		return r, err
 	}

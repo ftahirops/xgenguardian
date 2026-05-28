@@ -26,33 +26,40 @@ type Result struct {
 }
 
 // Run executes all Tier-1 checks against `domain` with a 250ms deadline.
+//
+// Each check runs in its own goroutine and writes into a fixed slot in `out`
+// (not a shared append-target) — `go test -race` clean, deterministic signal
+// ordering, no mutex or channel overhead. Zero-weight slots are dropped
+// after the wait so the public Result.Signals stays terse.
 func Run(ctx context.Context, domain string, brandKeywords []string) Result {
 	ctx, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
 	defer cancel()
 
-	r := Result{}
-	var signals []Signal
+	// Fixed-index slots, one per check. Order matches the slot indices
+	// below; reorder requires updating both sides.
+	const (
+		slotHomoglyph = iota
+		slotCert
+		slotLexical
+		slotDGA
+		nSlots
+	)
+	var out [nSlots]Signal
 
 	g, gctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
-		if s := homoglyphScore(domain, brandKeywords); s.Weight > 0 {
-			signals = append(signals, s)
-		}
+		out[slotHomoglyph] = homoglyphScore(domain, brandKeywords)
 		return nil
 	})
 
 	g.Go(func() error {
-		if s := certScore(gctx, domain); s.Weight > 0 {
-			signals = append(signals, s)
-		}
+		out[slotCert] = certScore(gctx, domain)
 		return nil
 	})
 
 	g.Go(func() error {
-		if s := lexicalScore(domain); s.Weight > 0 {
-			signals = append(signals, s)
-		}
+		out[slotLexical] = lexicalScore(domain)
 		return nil
 	})
 
@@ -65,20 +72,26 @@ func Run(ctx context.Context, domain string, brandKeywords []string) Result {
 			sld = domain[:i]
 		}
 		if s, ok := DGASignal(sld); ok {
-			signals = append(signals, s)
+			out[slotDGA] = s
 		}
 		return nil
 	})
 
 	_ = g.Wait()
 
+	// Compact: keep only signals that actually fired (Weight > 0).
+	signals := make([]Signal, 0, nSlots)
 	var sum float64
-	for _, s := range signals {
-		sum += s.Weight
+	for _, s := range out {
+		if s.Weight > 0 {
+			signals = append(signals, s)
+			sum += s.Weight
+		}
 	}
-	r.Signals = signals
-	r.Score = clamp(sum / 1.5) // rough normalization for 3-signal max
-	return r
+	return Result{
+		Signals: signals,
+		Score:   clamp(sum / 1.5), // rough normalization for 3-signal max
+	}
 }
 
 // homoglyphScore — homoglyph / typosquat / combosquat detector.

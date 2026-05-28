@@ -48,13 +48,28 @@ S3_SECRET = os.getenv("S3_SECRET_KEY", "xggadmin123")
 S3_PUBLIC_BASE = os.getenv("S3_PUBLIC_BASE", "http://localhost:9000/xgg-evidence")
 RENDER_TIMEOUT_MS = int(os.getenv("RENDER_TIMEOUT_MS", "5000"))
 
+# Global concurrency caps. Chromium is heavy; without these a burst from
+# fp-bench or a malicious site forcing many popups can OOM the host (we
+# observed 500+ leaked renderers under load before the try/finally fix).
+# Two pools so a long crawl/aggressive-scan can't starve user-facing /v1/check
+# calls coming through extension or verdict-api.
+MAX_CONCURRENT_RENDERS_SYNC  = int(os.getenv("MAX_CONCURRENT_RENDERS_SYNC", "10"))
+MAX_CONCURRENT_RENDERS_ASYNC = int(os.getenv("MAX_CONCURRENT_RENDERS_ASYNC", "4"))
+RENDER_QUEUE_TIMEOUT_S       = float(os.getenv("RENDER_QUEUE_TIMEOUT_S", "10"))
+
+# Created in lifespan() so they're bound to the loop.
+_sync_sem:  asyncio.Semaphore | None = None
+_async_sem: asyncio.Semaphore | None = None
+
 _pw: Playwright | None = None
 _browser: Browser | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _pw, _browser
+    global _pw, _browser, _sync_sem, _async_sem
+    _sync_sem  = asyncio.Semaphore(MAX_CONCURRENT_RENDERS_SYNC)
+    _async_sem = asyncio.Semaphore(MAX_CONCURRENT_RENDERS_ASYNC)
     _pw = await async_playwright().start()
     # DNS bypass: force Chromium to resolve via Cloudflare DoH directly,
     # ignoring the host OS resolver. On hosts running NextDNS / Pi-hole /
@@ -91,6 +106,10 @@ class RenderRequest(BaseModel):
     url: HttpUrl
     viewport: tuple[int, int] = (1440, 900)
     wait_until: str = "networkidle"  # 'load' | 'domcontentloaded' | 'networkidle'
+    # Pool selector. "sync" is the default for /v1/check from extension and
+    # verdict-api (user-blocking). "async" is for crawl, aggressive-scan,
+    # multi-vantage diff — slower work that mustn't starve user requests.
+    pool: str = "sync"  # 'sync' | 'async'
 
 
 class FormAction(BaseModel):
@@ -174,6 +193,29 @@ async def render(req: RenderRequest) -> RenderResponse:
     if _browser is None:
         raise HTTPException(503, "browser not ready")
 
+    # Concurrency gate. Pool selected via req.pool ("sync" or "async").
+    # "sync" pool serves user-blocking traffic (extension + verdict-api).
+    # "async" pool serves crawl / multi-vantage / aggressive-scan jobs.
+    # Acquire with timeout: returns 429 rather than queueing indefinitely
+    # so misbehaving callers get fast backpressure.
+    sem = _async_sem if req.pool == "async" else _sync_sem
+    if sem is None:
+        raise HTTPException(503, "browser not ready")
+    try:
+        await asyncio.wait_for(sem.acquire(), timeout=RENDER_QUEUE_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=429,
+            detail=f"render queue full (pool={req.pool})",
+            headers={"X-Render-Queue-Full": req.pool},
+        )
+    try:
+        return await _do_render(req)
+    finally:
+        sem.release()
+
+
+async def _do_render(req: RenderRequest) -> RenderResponse:
     t0 = time.time()
     evidence_id = str(uuid.uuid4())
     # Playwright records every request/response into a HAR file natively —

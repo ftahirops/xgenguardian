@@ -19,6 +19,13 @@ build:
 
 test:
 	go test ./services/...
+
+# Race-detector run — required green before merging any concurrent code.
+# Catches data races like the Tier-1 signals-append bug fixed 2026-05-28.
+test-race:
+	cd services/verdict-api && go test -race ./...
+	cd services/resolver && go test -race ./...
+	cd services/scheduler && go test -race ./...
 	cd services/sandbox-render && pytest -q
 	cd services/visual-match && pytest -q
 

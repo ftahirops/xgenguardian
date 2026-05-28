@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -35,6 +36,12 @@ type Server struct {
 	WebRisk     *feeds.WebRiskClient  // optional; nil disables corroborator
 	OAuthReg    *oauthreg.Cache       // optional; nil disables OAuth check
 	Tier1Budget time.Duration
+
+	// sandboxCoalescer dedups in-flight sandbox renders by normalized URL.
+	// Lazy-initialized on first use so tests that don't render don't
+	// need to instantiate. See coalesce.go.
+	sandboxCoalescer     *coalescer
+	sandboxCoalescerOnce sync.Once
 }
 
 func (s *Server) Routes() http.Handler {
