@@ -180,9 +180,19 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
 
   // Everything else: swap to holding interstitial so user never sees the
   // raw page mid-decision. holding.html will poll and call back.
-  await chrome.tabs.update(details.tabId, {
-    url: holdingURL(url, null, null),
-  });
+  //
+  // Guarded: when the source frame is already chrome-error:// (e.g. user's
+  // upstream DNS blocked the host before Chrome could resolve it), the
+  // cross-origin redirect to chrome-extension:// is forbidden by Chrome.
+  // In that case let Chrome's native error page stand rather than
+  // surfacing an ambiguous extension-error to the user.
+  try {
+    await chrome.tabs.update(details.tabId, {
+      url: holdingURL(url, null, null),
+    });
+  } catch (e) {
+    console.warn("[xgg] holding redirect rejected (likely network-level block on", url, "):", e?.message || e);
+  }
 });
 
 // ---------- popup / new-tab hook (the §3 differentiator) ----------
@@ -211,21 +221,29 @@ chrome.webNavigation.onCreatedNavigationTarget.addListener(async (details) => {
   // Decision matrix §3.1, short-circuit case: opener already BLOCKED.
   // We don't even scan the target — block on lineage alone.
   if (openerVerdict === "BLOCK") {
-    await chrome.tabs.update(details.tabId, {
-      url: interstitialURL("blocked.html", target, {
-        block_reason: "Opened by a page that XGenGuardian had already blocked.",
-        reason_codes: ["BLOCKED_OPENER_LINEAGE"],
-      }, opener),
-    });
+    try {
+      await chrome.tabs.update(details.tabId, {
+        url: interstitialURL("blocked.html", target, {
+          block_reason: "Opened by a page that XGenGuardian had already blocked.",
+          reason_codes: ["BLOCKED_OPENER_LINEAGE"],
+        }, opener),
+      });
+    } catch (e) {
+      console.warn("[xgg] blocked redirect rejected:", e?.message || e);
+    }
     return;
   }
 
   // Every other case (suspicious opener + unknown target, clean opener + unknown
   // target, etc.) routes through holding.html which gets the full verdict with
   // opener context attached so verdict-api can apply UNKNOWN_TARGET_FROM_SUSPICIOUS_OPENER.
-  await chrome.tabs.update(details.tabId, {
-    url: holdingURL(target, opener, openerVerdict),
-  });
+  try {
+    await chrome.tabs.update(details.tabId, {
+      url: holdingURL(target, opener, openerVerdict),
+    });
+  } catch (e) {
+    console.warn("[xgg] popup-target redirect rejected:", e?.message || e);
+  }
 });
 
 // ---------- messages from holding.html ----------
