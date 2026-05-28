@@ -71,6 +71,15 @@ type checkRequest struct {
 	// Paranoid — Executive Mode flag passed by the extension per-request.
 	// strictness.Apply uses this to elevate unknown/B/C grades to ISOLATE.
 	Paranoid     bool   `json:"paranoid,omitempty"`
+	// Mode — extension's protection-mode selector (normal/safe/family/strict/
+	// paranoid). Defaults to "normal" if absent. Determines which category
+	// feed_entries auto-BLOCK.
+	Mode         string `json:"mode,omitempty"`
+	// Categories — per-category allow/block overrides keyed by category name
+	// (adult, gambling, piracy, crack_keygen, malvertising, popunder).
+	// Maps to feed_entries.category. true = block in this category, false =
+	// allow. When not provided we use the mode's defaults.
+	Categories   map[string]bool `json:"categories,omitempty"`
 }
 
 type checkResponse struct {

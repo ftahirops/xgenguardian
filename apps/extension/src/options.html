@@ -6,67 +6,100 @@
   <style>
     :root { color-scheme: dark; }
     body { margin:0; font-family: ui-sans-serif, system-ui, sans-serif; background:#0a0c11; color:#e8eaed; }
-    main { max-width: 640px; margin: 64px auto; padding: 0 24px; }
-    h1 { font-size: 24px; }
-    .field { margin-top: 24px; }
+    main { max-width: 720px; margin: 48px auto; padding: 0 24px 80px; }
+    h1 { font-size: 24px; margin: 0 0 8px; }
+    h2 { font-size: 16px; margin: 32px 0 12px; color: #6bb0ff; text-transform: uppercase; letter-spacing: 0.6px; }
+    .tagline { color:#9aa3b2; font-size: 14px; margin: 0 0 24px; }
+    .field { margin-top: 16px; }
     .field label { display:block; font-size: 13px; color:#9aa3b2; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom:6px; }
     input[type=text], input[type=url] {
       width: 100%; padding: 10px 12px; background: #11141d; color: inherit;
       border: 1px solid #2a3142; border-radius: 6px; font-size: 14px;
     }
-    .check { display:flex; align-items:center; gap:10px; margin-top: 16px; }
+    .check { display:flex; align-items:center; gap:10px; margin-top: 10px; }
+    .check label { text-transform: none; letter-spacing: normal; color: #e8eaed; font-size: 14px; }
     button { margin-top: 28px; padding: 10px 18px; background: #5e8bff; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; }
     .saved { margin-left: 12px; color: #52c41a; opacity: 0; transition: opacity 0.3s; }
     .saved.show { opacity: 1; }
+    small { color:#6f7787; }
+    .box { padding: 16px 18px; border: 1px solid #2a3142; border-radius: 8px; background: #0d1018; margin-top: 12px; }
+
+    /* Mode picker */
+    .modes { display: grid; grid-template-columns: 1fr; gap: 10px; }
+    .mode { padding: 14px 16px; border: 1px solid #2a3142; border-radius: 8px; background: #0d1018; cursor: pointer; transition: all 0.15s; }
+    .mode:hover { border-color: #5e8bff; background: #11151f; }
+    .mode.selected { border-color: #6bb0ff; background: #16203a; box-shadow: 0 0 0 1px #6bb0ff; }
+    .mode-head { display: flex; align-items: center; gap: 10px; }
+    .mode-name { font-size: 16px; font-weight: 600; }
+    .mode-badge { font-size: 11px; padding: 2px 8px; border-radius: 4px; background: #2a3142; color: #9aa3b2; text-transform: uppercase; letter-spacing: 0.4px; }
+    .mode-badge.recommended { background: #1b3a1f; color: #6dd47d; }
+    .mode-desc { color: #bcc3d0; font-size: 13px; margin-top: 6px; }
+    .mode-blocks { color: #9aa3b2; font-size: 12px; margin-top: 6px; }
+
+    /* Category toggles */
+    .cats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .cat { padding: 12px 14px; border: 1px solid #2a3142; border-radius: 6px; background: #0d1018; }
+    .cat-head { display: flex; align-items: center; gap: 10px; }
+    .cat-name { font-weight: 600; font-size: 14px; }
+    .cat-meta { color: #6f7787; font-size: 11px; margin-top: 4px; }
+
+    /* DNS hint */
+    .dns-rec { padding: 14px 16px; background: #15201a; border: 1px solid #2c4438; border-radius: 8px; margin-top: 12px; }
+    .dns-rec-head { color: #6dd47d; font-weight: 600; font-size: 13px; }
+    .dns-rec code { background: #0a1311; padding: 2px 6px; border-radius: 4px; font-family: ui-monospace, monospace; color: #b8e9c4; font-size: 12px; }
+
+    .divider { height: 1px; background: #2a3142; margin: 32px 0 0; }
   </style>
 </head>
 <body>
   <main>
-    <h1>XGenGuardian Settings</h1>
+    <h1>XGenGuardian</h1>
+    <p class="tagline">Per-URL evidence + action-aware verdicts. Pick a mode and adjust categories below.</p>
 
-    <div class="field">
-      <label for="apiBase">Verdict API endpoint</label>
-      <input type="url" id="apiBase" placeholder="https://api.xgenguardian.com" />
-      <small style="color:#6f7787">Change only if you self-host or use a regional endpoint.</small>
+    <h2>Protection Mode</h2>
+    <p class="tagline">The mode sets defaults for all the category toggles below. You can override individual categories after picking.</p>
+    <div class="modes" id="modes">
+      <!-- populated by JS -->
     </div>
 
-    <div class="field">
-      <label for="portalApiBase">Evidence (portal-api) endpoint</label>
-      <input type="url" id="portalApiBase" placeholder="https://api.xgenguardian.com" />
-      <small style="color:#6f7787">The block page fetches deep evidence from this server. Usually the same as the verdict API.</small>
+    <h2>Categories to block</h2>
+    <p class="tagline">Each category uses curated public blocklists. Toggling here overrides the mode defaults.</p>
+    <div class="cats" id="categories">
+      <!-- populated by JS -->
     </div>
 
+    <h2>Recommended DNS</h2>
+    <p class="tagline">XGenGuardian works alongside protective DNS. Set this at your OS / router level for defense-in-depth.</p>
+    <div class="dns-rec" id="dns-rec">
+      <!-- filled by JS -->
+    </div>
+
+    <div class="divider"></div>
+
+    <h2>API Endpoints</h2>
+    <div class="field">
+      <label for="apiBase">Verdict API</label>
+      <input type="url" id="apiBase" placeholder="http://135.181.79.11:18080" />
+      <small>Self-hosted? Override here. Default is the operator's VPS.</small>
+    </div>
+    <div class="field">
+      <label for="portalApiBase">Evidence (portal-api)</label>
+      <input type="url" id="portalApiBase" placeholder="http://135.181.79.11:18081" />
+      <small>Block page fetches deep evidence from this endpoint.</small>
+    </div>
+
+    <h2>General</h2>
     <div class="check">
       <input type="checkbox" id="enabled" />
       <label for="enabled">Protection enabled</label>
     </div>
-
     <div class="check">
       <input type="checkbox" id="enforceWarn" />
-      <label for="enforceWarn">Also block WARN-level pages (stricter)</label>
+      <label for="enforceWarn">Also block WARN-level pages (stricter than mode default)</label>
     </div>
-
     <div class="check">
       <input type="checkbox" id="telemetry" />
       <label for="telemetry">Share anonymous block telemetry to improve detection</label>
-    </div>
-
-    <div class="field" style="margin-top: 40px; padding: 20px; border: 1px solid #2a3142; border-radius: 8px; background: #0d1018;">
-      <label style="color:#6bb0ff;">Executive Mode</label>
-      <div style="color:#bcc3d0; font-size: 13px; margin: 8px 0 16px;">
-        Only sites with confirmed clean history (grade A or A+) load directly.
-        Everything else opens in isolation. Reduces unknown-site risk by roughly
-        7 percentage points at the cost of more interstitials.
-        Recommended for executives, journalists, IR analysts.
-        <br /><br />
-        <strong style="color:#ffc56b;">First 24 hours after enabling:</strong>
-        a warm-up window keeps lightly-trusted sites loading normally while your
-        personal cache populates.
-      </div>
-      <div class="check">
-        <input type="checkbox" id="paranoidMode" />
-        <label for="paranoidMode">Enable Executive Mode</label>
-      </div>
     </div>
 
     <button id="save">Save</button>

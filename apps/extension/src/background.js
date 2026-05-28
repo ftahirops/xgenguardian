@@ -96,7 +96,9 @@ async function fetchVerdict(url, opener) {
         url,
         client_id: "extension/0.2.0",
         opener_url: opener || undefined,
-        paranoid: cfg.paranoidMode || undefined,
+        paranoid: (cfg.mode === "paranoid") || cfg.paranoidMode || undefined,
+        mode: cfg.mode || "normal",
+        categories: cfg.categories || undefined,
       }),
       signal: ctrl.signal,
     });

@@ -194,6 +194,7 @@ func buildPolicyInputs(
 		ctx.FeedHighSources = feedHit.HighSources
 		ctx.FeedMediumSources = feedHit.MediumSources
 		ctx.FeedLowSources = feedHit.LowSources
+		ctx.FeedCategories = feedHit.Categories
 	}
 	if render != nil {
 		ctx.IsChallengePage = render.IsChallengePage
@@ -295,6 +296,7 @@ func buildPolicyInputs(
 		Context:               ctx,
 		PageClass:             cls,
 		Paranoid:              req.Paranoid,
+		CategoryBlocks:        req.Categories,
 		VerificationAvailable: render != nil || in.BlocklistHit,
 		TrustedIdentity:       trustreg.IsTrusted(in.Domain),
 	}

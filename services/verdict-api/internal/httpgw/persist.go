@@ -272,6 +272,11 @@ type FeedHit struct {
 	// LowSources — subset whose confidence='low'. Informational only,
 	// never blocks on its own.
 	LowSources []string
+	// Categories — distinct content-category labels associated with the
+	// matched rows. Lets the policy honor per-mode category-block toggles
+	// (adult/gambling/piracy/crack_keygen/malvertising) instead of treating
+	// every high-confidence feed equally.
+	Categories []string
 }
 
 // Hit reports whether at least one source matched.
@@ -307,14 +312,14 @@ func queryFeedHit(ctx context.Context, pg *pgxpool.Pool, rawurl, domain string) 
 	// (url OR domain) match below.
 	if isSharedHosting(domain) || trustreg.IsTrusted(domain) {
 		rows, err = pg.Query(ctx, `
-			SELECT DISTINCT source, confidence FROM feed_entries
+			SELECT DISTINCT source, confidence, category FROM feed_entries
 			WHERE url = $1
 			  AND last_seen > NOW() - INTERVAL '14 days'
 			LIMIT 8
 		`, rawurl)
 	} else {
 		rows, err = pg.Query(ctx, `
-			SELECT DISTINCT source, confidence FROM feed_entries
+			SELECT DISTINCT source, confidence, category FROM feed_entries
 			WHERE (url = $1 OR domain = $2)
 			  AND last_seen > NOW() - INTERVAL '14 days'
 			LIMIT 8
@@ -327,9 +332,10 @@ func queryFeedHit(ctx context.Context, pg *pgxpool.Pool, rawurl, domain string) 
 	defer rows.Close()
 
 	out := FeedHit{}
+	catSeen := map[string]bool{}
 	for rows.Next() {
-		var src, conf string
-		if err := rows.Scan(&src, &conf); err != nil {
+		var src, conf, cat string
+		if err := rows.Scan(&src, &conf, &cat); err != nil {
 			continue
 		}
 		out.Sources = append(out.Sources, src)
@@ -340,6 +346,10 @@ func queryFeedHit(ctx context.Context, pg *pgxpool.Pool, rawurl, domain string) 
 			out.LowSources = append(out.LowSources, src)
 		default: // medium or unrecognized -> treat as medium
 			out.MediumSources = append(out.MediumSources, src)
+		}
+		if cat != "" && !catSeen[cat] {
+			catSeen[cat] = true
+			out.Categories = append(out.Categories, cat)
 		}
 	}
 	return out, nil

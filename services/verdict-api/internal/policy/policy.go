@@ -28,6 +28,8 @@
 package policy
 
 import (
+	"strings"
+
 	"github.com/xgenguardian/services/verdict-api/internal/pageclass"
 	"github.com/xgenguardian/services/verdict-api/internal/reasons"
 )
@@ -104,6 +106,11 @@ type ContextOutput struct {
 	FeedHighSources     []string
 	FeedMediumSources   []string
 	FeedLowSources      []string
+	// FeedCategories — content-category labels from feed_entries.category
+	// for the rows that matched (adult/gambling/piracy/crack_keygen/
+	// malvertising). The policy compares against the user's per-category
+	// mode flags before treating the hit as auto-BLOCK.
+	FeedCategories      []string
 	PathDrift           bool     // previously-trusted domain, new sensitive path
 	IsChallengePage     bool     // bot-protection wall (Cloudflare/Turnstile/etc.)
 	ChallengeKind       string
@@ -170,6 +177,15 @@ type Inputs struct {
 	// Paranoid: Executive Mode toggle. Tightens generic mapping.
 	Paranoid     bool
 
+	// CategoryBlocks — per-category enable flags from the extension's
+	// mode/categories selector. When a feed hit's category is true here,
+	// it's an auto-BLOCK; when false, the page is allowed even if it
+	// matched a category feed.
+	//
+	// Keys: "adult" | "gambling" | "piracy" | "crack_keygen" |
+	//       "malvertising" | "popunder"
+	CategoryBlocks map[string]bool
+
 	// VerificationAvailable: false when sandbox/visual-match were down,
 	// which makes Stages B/C/D unknowable rather than absent.
 	VerificationAvailable bool
@@ -203,6 +219,51 @@ func Apply(in Inputs) Result {
 		Verdict:      Allow,
 		ReasonCodes:  []string{},
 		StageOutcome: map[string]string{},
+	}
+
+	// --- Stage F.0: category-feed BLOCK + content-vs-security split ---
+	//
+	// Categories come in two flavors:
+	//
+	//   SECURITY (always blocks):
+	//     "malware" | "phishing" | "c2" | "" (default — pre-category-feed entries)
+	//
+	//   CONTENT (mode-gated):
+	//     "adult" | "gambling" | "piracy" | "crack_keygen" | "malvertising"
+	//
+	// Content categories only block when the user has them ON in mode/
+	// categories. Security categories always block (the standard feed-hit
+	// path). This lets a user run "Normal" mode and visit adult content,
+	// while still being protected from URLhaus malware on the same feed-
+	// lookup table.
+	if len(in.Context.FeedCategories) > 0 {
+		hasContentOnly := true
+		anyContentEnabled := false
+		for _, cat := range in.Context.FeedCategories {
+			if !isContentCategory(cat) {
+				hasContentOnly = false
+				continue
+			}
+			if in.CategoryBlocks != nil && in.CategoryBlocks[cat] {
+				anyContentEnabled = true
+				r.Verdict = Block
+				r.Confidence = 0.95
+				r.BlockReason = "Blocked by your " + cat + "-category filter."
+				r.ReasonCodes = append(r.ReasonCodes, "CATEGORY_BLOCK_"+strings.ToUpper(cat))
+				r.StageOutcome["F"] = "category-block:" + cat
+				return r
+			}
+		}
+		// If every matched feed row was a CONTENT category and the user has
+		// none enabled, treat as no-feed-hit so the F.1 high-confidence rule
+		// doesn't fire on (e.g.) StevenBlack adult entries when the user
+		// has opted to allow adult content.
+		if hasContentOnly && !anyContentEnabled {
+			in.Context.FeedHit = false
+			in.Context.FeedHighSources = nil
+			in.Context.FeedMediumSources = nil
+			in.Context.FeedSources = nil
+		}
 	}
 
 	// --- Stage F.1: threat-feed lookup with source-tier consensus ---
@@ -655,4 +716,14 @@ func itoa(n int) string {
 		b[i] = '-'
 	}
 	return string(b[i:])
+}
+
+// isContentCategory — true for category labels that are content filters
+// (mode-gated), false for security categories (always block).
+func isContentCategory(c string) bool {
+	switch strings.ToLower(c) {
+	case "adult", "gambling", "piracy", "crack_keygen", "malvertising", "popunder":
+		return true
+	}
+	return false
 }

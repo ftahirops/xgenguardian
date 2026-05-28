@@ -147,11 +147,39 @@ async def match_image(req: EmbedRequest) -> MatchResponse:
     )
 
 
+def _hex_bitcount(h: str) -> int:
+    """Population-count over a hex hash string. Bad seeds where the
+    rendered screenshot was blank/error produce all-zeros or near-zeros
+    hashes; using them as comparison targets makes every other blank/error
+    page "match" at 100% (the piratebayproxy → Snapchat / porn.com → Trezor
+    misclassifications). Reject hashes with too-few set bits."""
+    if not h:
+        return 0
+    return sum(bin(int(c, 16)).count("1") for c in h if c in "0123456789abcdefABCDEF")
+
+
+# Minimum acceptable population count for stored brand_screenshots hashes.
+# Real content pages produce 28-40 set bits on average; values under 10 are
+# almost certainly degenerate seeds. Also reject the same low-quality inputs
+# arriving from the live page being scanned.
+_MIN_HASH_BITS = 10
+
+
 def _phash_nearest(in_phash, in_dhash, max_distance: int = 8) -> dict[str, Any] | None:
     """Return the brand_screenshots row closest in Hamming distance to the input
     pHash, or None if no stored hash is within max_distance. dHash is consulted
-    as a tie-breaker / second-opinion."""
+    as a tie-breaker / second-opinion.
+
+    Skips rows whose stored pHash/dHash is degenerate (low bit count) — those
+    are bad-seed artifacts that would produce spurious 100% matches against
+    any blank/Cloudflare-challenged page.
+    """
     if _pg is None:
+        return None
+    # If the INCOMING image hash is itself degenerate (the live page rendered
+    # blank / showed only a Cloudflare challenge / failed to load), nothing
+    # useful can come from comparing it to anything. Return no match.
+    if _hex_bitcount(str(in_phash)) < _MIN_HASH_BITS or _hex_bitcount(str(in_dhash)) < _MIN_HASH_BITS:
         return None
     with _pg.cursor() as cur:
         cur.execute(
@@ -168,6 +196,12 @@ def _phash_nearest(in_phash, in_dhash, max_distance: int = 8) -> dict[str, Any] 
 
     best: dict[str, Any] | None = None
     for row in candidates:
+        # Defense-in-depth: even though we just purged degenerate rows,
+        # filter at query time too so future bad seeds can't poison results.
+        if _hex_bitcount(row["phash"]) < _MIN_HASH_BITS:
+            continue
+        if row.get("dhash") and _hex_bitcount(row["dhash"]) < _MIN_HASH_BITS:
+            continue
         try:
             stored_p = imagehash.hex_to_hash(row["phash"])
             d_p = in_phash - stored_p
