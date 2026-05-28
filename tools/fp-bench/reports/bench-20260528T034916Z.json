@@ -1,0 +1,420 @@
+{
+  "timestamp": "2026-05-28T03:49:16.634490+00:00",
+  "per_label": {
+    "benign": {
+      "total": 556,
+      "errors": 0,
+      "fp_count": 2,
+      "fp_rate": 0.0035971223021582736,
+      "allowed_count": 554,
+      "fp_urls": [
+        {
+          "url": "https://gravatar.com/",
+          "verdict": "BLOCK",
+          "grade": "F+",
+          "codes": [
+            "EXTERNAL_FEED_HIT"
+          ],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://telegram.me/",
+          "verdict": "BLOCK",
+          "grade": "F+",
+          "codes": [
+            "EXTERNAL_FEED_HIT"
+          ],
+          "page_class": "generic"
+        }
+      ]
+    },
+    "malicious": {
+      "total": 623,
+      "errors": 0,
+      "tp_count": 292,
+      "tp_rate": 0.46869983948635635,
+      "fn_count": 331,
+      "fn_urls": [
+        {
+          "url": "https://pyzoi.ceremoniavezeto.hu/b2cfeb8f-7d34-47f2-835e-087faf8183a9",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://7orku7ut.taxrundo.sk/?ublib=2cbc0fec-ff00-46a5-be37-e0d3144b7366",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://ooeet.cannaturalgroup.com/69fa3392-0e6c-41aa-ad7f-bacbbbb9373f",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://xosum.butoralberlet.com/22a5bb62-8fab-46d7-8219-c34720bf5b59",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://gvsob.buborekjatszohaz.hu/ad46eee6-7297-4f37-a642-267b965edf5a",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://oyazs.brssolar.hu/005621e6-914d-4872-a253-9ceff3a6962e",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://mfvea.bognartransport.hu/cac4a6c9-f3a8-4e9e-be63-7de2e84344e4",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://y4hvadqo.taxrundo.hu/?ublib=b463bd29-39ca-493f-8b84-43a2709f2a9f",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://mtuvm.akonyvelod.hu/a2875854-f58a-4d23-98e4-6ee026a4d3c4",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://burwu.akonyvelod.hu/2fcdb899-5518-4970-86ab-8da8cd7ccd8c",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://owqrh.akonyvelod.hu/4f995fb6-d47a-48ce-aae3-1e238857ce88",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://utwli.almasiklima.hu/fc3af604-8905-468d-b8b8-3b2212f3f7d0",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://4dfx0u7r.stgsolar.hu/?ublib=8cc3f2c1-fa75-494e-aac4-19fe60ee20d0",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://tukwp.bni-ai.com/8c5337eb-b174-42f5-868b-406456f29212",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://saxjb.bninolimit.com/508c2e6f-f27e-435b-aeb2-d0c26b7a6718",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://vlhxe.bognartransport.hu/1ccd458f-fd9b-46d3-bb0f-46d2c4a79496",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://s9fsvyxk.seresniki.com/?ublib=86070a2b-b8c6-47ac-9016-fd461811ef17",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://ogoba.bohochal.hu/4f884129-2bb5-439b-8c14-1bb19a1e1b24",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://gitlab.com/notificaciones-judiciales-rama-judicial-colombia1/rama-judicial-del-poder-publico/-/raw/mainclass.txt",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://gitlab.com/notificaciones-judiciales-rama-judicial-colombia1/rama-judicial-del-poder-publico/-/raw/mainpure31agosto.txt",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://gitlab.com/notificaciones-judiciales-rama-judicial-colombia1/rama-judicial-del-poder-publico/-/raw/mainNuevo_Documento_de_texto.txt",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://firebasestorage.googleapis.com/v0/b/rodriakd-8413d.appspot.com/o/dll%2FMSBuild.txt?alt=media&token=984ee921-1647-4fd6-a4df-ef3e9fea927b",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://gitlab.com/notificaciones-judiciales-rama-judicial-colombia1/rama-judicial-del-poder-publico/-/raw/mainpurelogbase.txt",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://gitlab.com/notificaciones-judiciales-rama-judicial-colombia1/rama-judicial-del-poder-publico/-/raw/main/tumfuf.txt",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://gitlab.com/notificaciones-judiciales-rama-judicial-colombia1/rama-judicial-del-poder-publico/-/raw/mainx31agosto.txt",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://gitlab.com/notificaciones-judiciales-rama-judicial-colombia1/rama-judicial-del-poder-publico/-/raw/main31agosto.txt",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://gitlab.com/notificaciones-judiciales-rama-judicial-colombia1/rama-judicial-del-poder-publico/-/raw/maintumfuf.txt",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/cabeto850128/comicsam/refs/heads/main/kiSBJ4DDvg.pif",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://firebasestorage.googleapis.com/v0/b/rodriakd-8413d.appspot.com/o/dll%2F1%20link%20dll.txt?alt=media&token=e7389ad2-4ad9-4fb7-bf60-2a502bbb6c6c",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/cabeto850128/comicsam/refs/heads/main/CdBhhfa.html",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://kqfna.bonuszugynokseg.hu/8a62e1f9-5dca-4435-8a65-5ae7ab614b5d",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://nitrogateway.digital/xawk.r",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://nitrogateway.digital/vzuk.ocx",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://nitrogateway.digital/b1/enix.r",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/solid-23/ghy/refs/heads/main/kkArdSd.txt",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/slaytonms/ab/refs/heads/main/AdkkSfA.txt",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/solid-23/kl/refs/heads/main/mkFpIik.txt",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/solid-23/job/refs/heads/main/fhhkmoo.txt",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/solid-23/ap/refs/heads/main/kdmmnrI.txt",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/slaytonms/gt/refs/heads/main/djkpodd.txt",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/slaytonms/nb/refs/heads/main/SrdmaIk.txt",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/slaytonms/hy/refs/heads/main/cAbdcfo.txt",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/slaytonms/df/refs/heads/main/oicAjon.txt",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/slaytonms/hi/refs/heads/main/peokjfS.txt",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://dpkrz.boutiqbar.com/761207d2-e403-4d7e-aa7e-d9cdcb8dafbf",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://malqen.life/js/IMG_20260527_082143_803.png",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://hwhza.brandbuilder.hu/6d2182cb-9cb4-4e68-839a-5cfa8dd7a030",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://moxii.brssolar.hu/09eb6f88-5a2c-49e2-bb09-a18c8dce16cd",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://nova.podril1ak2.online/bins/nova.mipsel",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://nova.podril1ak2.online/bins/nova.powerpc",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        }
+      ]
+    }
+  },
+  "per_reason_code": {
+    "MALWARE_RAW_IP_BINARY_DROP": {
+      "benign_hits": 0,
+      "malicious_hits": 141,
+      "signal_ratio": 1.0
+    },
+    "SENSITIVE_PAGE_VERIFICATION_UNAVAILABLE": {
+      "benign_hits": 0,
+      "malicious_hits": 46,
+      "signal_ratio": 1.0
+    },
+    "EXTERNAL_FEED_HIT": {
+      "benign_hits": 2,
+      "malicious_hits": 66,
+      "signal_ratio": 0.971
+    },
+    "RAW_IP_HOST": {
+      "benign_hits": 0,
+      "malicious_hits": 39,
+      "signal_ratio": 1.0
+    }
+  },
+  "latency_ms": {
+    "count": 1179,
+    "p50": 8001,
+    "p95": 8006,
+    "p99": 8007,
+    "max": 8008
+  }
+}

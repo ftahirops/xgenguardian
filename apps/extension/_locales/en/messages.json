@@ -1,0 +1,9 @@
+{
+  "extName":  { "message": "XGenGuardian" },
+  "extDesc":  { "message": "Catches phishing your DNS missed. Per-URL evidence for every block." },
+  "blocked_title": { "message": "Blocked by XGenGuardian" },
+  "blocked_body":  { "message": "This page was blocked because it looks like a phishing attempt." },
+  "view_evidence": { "message": "View evidence" },
+  "go_back":       { "message": "Go back" },
+  "report_fp":     { "message": "I think this is wrong" }
+}

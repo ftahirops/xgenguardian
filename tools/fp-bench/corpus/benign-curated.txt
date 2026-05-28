@@ -1,0 +1,92 @@
+# Hand-curated benign URLs — MUST always resolve to ALLOW/CLEAN.
+# Any non-ALLOW verdict against this list is a bug that blocks merge.
+# Keep this list small and high-signal: top destinations, our own infra,
+# common SaaS login pages. New entries only when verified safe.
+#
+# Last updated: 2026-05-27
+
+# --- Top destinations ---
+https://www.google.com/
+https://www.youtube.com/
+https://github.com/
+https://en.wikipedia.org/
+https://www.amazon.com/
+https://www.reddit.com/
+https://stackoverflow.com/
+https://twitter.com/
+https://www.linkedin.com/
+https://www.bing.com/
+
+# --- Banks (commonly impersonated, must never FP) ---
+https://www.chase.com/
+https://www.bankofamerica.com/
+https://www.wellsfargo.com/
+https://www.paypal.com/
+https://www.stripe.com/
+
+# --- SaaS login pages (sensitive class, must still ALLOW the real one) ---
+https://accounts.google.com/
+https://login.microsoftonline.com/
+https://login.live.com/
+https://github.com/login
+https://www.dropbox.com/login
+https://slack.com/signin
+https://app.notion.so/login
+https://workspace.google.com/
+
+# --- Payment / billing pages (sensitive, real ones must ALLOW) ---
+https://checkout.stripe.com/
+https://www.paypal.com/checkoutnow
+https://buy.itunes.apple.com/
+
+# --- OAuth flows (real ones must ALLOW) ---
+https://accounts.google.com/o/oauth2/v2/auth
+https://login.microsoftonline.com/common/oauth2/v2.0/authorize
+
+# --- Downloads (real signed binaries from vendor sites) ---
+https://www.mozilla.org/en-US/firefox/new/
+https://www.google.com/chrome/
+
+# --- Shared-hosting (the GitHub.com false-positive class) ---
+https://github.com/torvalds/linux
+https://github.com/anthropics/claude-code
+https://vercel.com/
+https://www.cloudflare.com/
+https://discord.com/
+https://www.notion.so/
+
+# --- Cloud / dev tools ---
+https://console.cloud.google.com/
+https://portal.azure.com/
+https://us-east-1.console.aws.amazon.com/
+
+# --- New-but-legit domains (RDAP-age FP class) ---
+# Add domains <1 year old that are known good as you discover them.
+
+# --- Our own infra ---
+https://mail.nocgurus.com/
+
+# --- Developer tool install / docs pages (must always ALLOW) ---
+# These are the legitimate counterparts to the Straiker "Fake Claude Code"
+# attack class. Real install pages that show curl|sh, irm, brew, npm
+# install commands. The engine must distinguish these from impersonators.
+https://docs.anthropic.com/en/docs/claude-code/quickstart
+https://docs.anthropic.com/en/docs/claude-code/overview
+https://www.anthropic.com/
+https://claude.ai/
+https://docs.cursor.com/welcome
+https://www.cursor.com/
+https://docs.continue.dev/getting-started/install
+https://www.continue.dev/
+https://cline.bot/
+https://docs.cline.bot/
+https://www.jetbrains.com/help/idea/installation-guide.html
+https://www.jetbrains.com/
+https://platform.openai.com/docs/quickstart
+https://platform.openai.com/docs/overview
+https://nodejs.org/en/download
+https://www.python.org/downloads/
+https://brew.sh/
+https://docs.docker.com/get-started/
+https://kubernetes.io/docs/setup/
+https://www.rust-lang.org/learn/get-started

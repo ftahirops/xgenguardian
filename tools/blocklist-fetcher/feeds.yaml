@@ -1,0 +1,151 @@
+# XGenGuardian — free public threat-intel feeds.
+#
+# Each entry:
+#   name      - short id, becomes the `source` tag in Redis hash
+#   url       - direct download URL (no auth)
+#   format    - one of:
+#                 hosts     # /etc/hosts format ("0.0.0.0 domain.tld" or "127.0.0.1 domain.tld")
+#                 domains   # one domain per line, # comments OK
+#                 urls      # one URL per line; we extract host
+#                 phishtank # PhishTank JSON
+#                 urlhaus   # URLhaus recent CSV
+#                 threatfox # ThreatFox JSON
+#                 oisd      # OISD format: line-by-line domains, ! comments
+#   category  - phishing | malware | ads | tracking | cryptomining | scam | generic
+#   active    - bool; flip to false to skip without removing
+#
+# Comment-out (with ! or leading -, then re-comment from feeds list) to disable.
+
+feeds:
+
+  # ──────────────────────── PHISHING ────────────────────────
+  - name: phishtank
+    # PhishTank now requires an API key for the bulk dump. Disabled until we
+    # register and store PHISHTANK_API_KEY env. Coverage is fully covered by
+    # phishing-database-active + cert-pl + phishing-army.
+    url: https://data.phishtank.com/data/online-valid.json
+    format: phishtank
+    category: phishing
+    active: false
+
+  - name: openphish
+    url: https://openphish.com/feed.txt
+    format: urls
+    category: phishing
+    active: true
+
+  - name: phishing-database-active
+    url: https://raw.githubusercontent.com/mitchellkrogza/Phishing.Database/master/phishing-domains-ACTIVE.txt
+    format: domains
+    category: phishing
+    active: true
+
+  - name: phishing-database-links-active
+    url: https://raw.githubusercontent.com/mitchellkrogza/Phishing.Database/master/phishing-links-ACTIVE.txt
+    format: urls
+    category: phishing
+    active: true
+
+  - name: cert-pl
+    url: https://hole.cert.pl/domains/domains.txt
+    format: domains
+    category: phishing
+    active: true
+
+  - name: phishing-army-blocklist
+    url: https://phishing.army/download/phishing_army_blocklist.txt
+    format: domains
+    category: phishing
+    active: true
+
+  # ──────────────────────── MALWARE ─────────────────────────
+  - name: urlhaus
+    url: https://urlhaus.abuse.ch/downloads/csv_recent/
+    format: urlhaus
+    category: malware
+    active: true
+
+  - name: threatfox
+    url: https://threatfox.abuse.ch/export/json/recent/
+    format: threatfox
+    category: malware
+    active: true
+
+  - name: malware-filter-urlhaus
+    url: https://malware-filter.gitlab.io/malware-filter/urlhaus-filter-domains.txt
+    format: domains
+    category: malware
+    active: true
+
+  - name: rpilist-malware
+    url: https://raw.githubusercontent.com/RPiList/specials/master/Blocklisten/malware
+    format: domains
+    category: malware
+    active: true
+
+  # ─────────────────────── CRYPTOMINING ─────────────────────
+  - name: cryptojacking-no-coin
+    url: https://raw.githubusercontent.com/hoshsadiq/adblock-nocoin-list/master/hosts.txt
+    format: hosts
+    category: cryptomining
+    active: true
+
+  - name: hagezi-cryptocurrency
+    url: https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/hoster.txt
+    format: domains
+    category: generic
+    active: false  # too broad; legitimate hosters flagged
+
+  # ─────────────────────── AGGREGATED ───────────────────────
+  - name: stevenblack-hosts
+    url: https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts
+    format: hosts
+    category: generic
+    active: true
+
+  - name: hagezi-pro
+    url: https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/pro.txt
+    format: domains
+    category: generic
+    active: true
+
+  - name: hagezi-tif
+    # NOTE: hagezi-tif is a MIXED feed (ads + tracking + phishing + malware
+    # bundled). Must stay `generic` so a domain needs corroboration from
+    # a second feed before entering strict — otherwise ad-tech domains
+    # popular enough to be in Tranco get NXDOMAINed.
+    url: https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/tif.txt
+    format: domains
+    category: generic
+    active: true
+
+  - name: oisd-small
+    url: https://small.oisd.nl/domainswild
+    format: domains
+    category: generic
+    active: true
+
+  # ───────────────────── ADS / TRACKING ─────────────────────
+  - name: adguard-sdn
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_2.txt
+    format: adguard
+    category: ads
+    active: true
+
+  - name: adaway-hosts
+    url: https://adaway.org/hosts.txt
+    format: hosts
+    category: ads
+    active: true
+
+  - name: disconnect-trackers
+    url: https://s3.amazonaws.com/lists.disconnect.me/simple_tracking.txt
+    format: domains
+    category: tracking
+    active: true
+
+  - name: easyprivacy
+    url: https://v.firebog.net/hosts/Easyprivacy.txt
+    format: domains
+    category: tracking
+    active: true

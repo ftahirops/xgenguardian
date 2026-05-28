@@ -1,0 +1,170 @@
+{
+  "timestamp": "2026-05-27T16:56:21.442086+00:00",
+  "per_label": {
+    "benign": {
+      "total": 20,
+      "errors": 0,
+      "fp_count": 0,
+      "fp_rate": 0.0,
+      "allowed_count": 20,
+      "fp_urls": []
+    },
+    "malicious": {
+      "total": 20,
+      "errors": 0,
+      "tp_count": 0,
+      "tp_rate": 0.0,
+      "fn_count": 20,
+      "fn_urls": [
+        {
+          "url": "http://110.36.76.43:37157/bin.sh",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://95.182.98.126/mig",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://46.8.70.117/mig",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://60.22.28.117:35540/i",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://110.37.30.28:49870/i",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://45.156.24.108/ppc",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://45.156.24.108/spc",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://45.156.24.108/arm",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://45.156.24.108/mips",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://45.156.24.108/sh4",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://110.36.80.162:47289/i",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://45.156.24.108/x86",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://42.234.233.219:46965/i",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://45.156.24.108/m68k",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://45.156.24.108/arm6",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://45.156.24.108/arm7",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://45.156.24.108/mpsl",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://45.156.24.108/x86_64",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://45.156.24.108/arm5",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://123.5.159.237:49983/bin.sh",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        }
+      ]
+    }
+  },
+  "per_reason_code": {},
+  "latency_ms": {
+    "count": 40,
+    "p50": 751,
+    "p95": 6444,
+    "p99": 6884,
+    "max": 6884
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "timestamp": "2026-05-27T16:58:33.460222+00:00",
+  "per_label": {
+    "benign": {
+      "total": 25,
+      "errors": 0,
+      "fp_count": 0,
+      "fp_rate": 0.0,
+      "allowed_count": 25,
+      "fp_urls": []
+    },
+    "malicious": {
+      "total": 25,
+      "errors": 0,
+      "tp_count": 21,
+      "tp_rate": 0.84,
+      "fn_count": 4,
+      "fn_urls": [
+        {
+          "url": "http://95.182.98.126/mig",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://46.8.70.117/mig",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://lhxly.cannatural.eu/31b18793-c225-4c9e-85ad-b15c2c83055e",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://pshcd.cannaturalgroup.com/f1c2ccfa-4dcb-4c66-a355-7b03985210ff",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        }
+      ]
+    }
+  },
+  "per_reason_code": {
+    "MALWARE_RAW_IP_BINARY_DROP": {
+      "benign_hits": 0,
+      "malicious_hits": 21,
+      "signal_ratio": 1.0
+    }
+  },
+  "latency_ms": {
+    "count": 50,
+    "p50": 640,
+    "p95": 6153,
+    "p99": 8001,
+    "max": 8001
+  }
+}

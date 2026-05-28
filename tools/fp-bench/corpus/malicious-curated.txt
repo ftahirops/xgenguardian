@@ -1,0 +1,41 @@
+# Hand-curated malicious URLs — MUST be caught (verdict != ALLOW).
+# Use for high-signal regression: campaigns we've publicly committed to
+# detecting. Adding here is a contract.
+#
+# Last updated: 2026-05-27
+
+# === Straiker "Fake Claude Code" campaign (2026-05-27 report) ===
+# Confirmed-active impersonator domains. Each was serving content as of
+# May 14, 2026. After ingesting feeds + adding Anthropic to trustreg,
+# every one of these should return BLOCK / ISOLATE / WARN.
+
+# Dedicated impersonation domains
+https://ravishingtattle.com/
+https://hyuzoa1-guboitzyasi.com/
+https://claudiyoketka.com/
+https://cludymians.com/
+https://atlasgpt-browser.com/
+https://claudare.it.com/
+https://myclaude.it.com/
+https://vdasfrae.it.com/
+https://claude-pro.com/
+
+# GitHub Pages impersonators (May 2026 wave)
+https://claude-desktop-llm.github.io/
+https://claude-deployer.github.io/
+https://claude-mac-deployer.github.io/
+https://claude-code-app.github.io/
+https://claude-codex.github.io/
+https://cloheviral.github.io/claude-code-installer
+https://leobrival.github.io/claude-code-installer
+
+# Cloudflare Pages
+https://clavycod.pages.dev/
+https://claudeoslast.pages.dev/
+https://pydjgkmashmn.pages.dev/
+
+# Squarespace + others
+https://claude-tool.squarespace.com/
+https://pycharm.squarespace.com/
+https://claudemac.netlify.app/
+https://claude-code-macos.framer.ai/

@@ -1,0 +1,232 @@
+{
+  "timestamp": "2026-05-27T16:33:12.192279+00:00",
+  "per_label": {
+    "benign": {
+      "total": 20,
+      "errors": 0,
+      "fp_count": 5,
+      "fp_rate": 0.25,
+      "allowed_count": 15,
+      "fp_urls": [
+        {
+          "url": "https://www.amazon.com/",
+          "verdict": "BLOCK",
+          "grade": "F+",
+          "codes": [
+            "EXTERNAL_FEED_HIT"
+          ],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://login.live.com/",
+          "verdict": "ISOLATE",
+          "grade": "C",
+          "codes": [
+            "SENSITIVE_PAGE_VERIFICATION_UNAVAILABLE"
+          ],
+          "page_class": "login"
+        },
+        {
+          "url": "https://login.microsoftonline.com/",
+          "verdict": "ISOLATE",
+          "grade": "C",
+          "codes": [
+            "SENSITIVE_PAGE_VERIFICATION_UNAVAILABLE"
+          ],
+          "page_class": "login"
+        },
+        {
+          "url": "https://www.dropbox.com/login",
+          "verdict": "ISOLATE",
+          "grade": "C",
+          "codes": [
+            "SENSITIVE_PAGE_VERIFICATION_UNAVAILABLE"
+          ],
+          "page_class": "login"
+        },
+        {
+          "url": "https://github.com/login",
+          "verdict": "BLOCK",
+          "grade": "F+",
+          "codes": [
+            "CREDENTIAL_SINK_HIDDEN_MIRROR"
+          ],
+          "page_class": "login"
+        }
+      ]
+    },
+    "malicious": {
+      "total": 20,
+      "errors": 0,
+      "tp_count": 0,
+      "tp_rate": 0.0,
+      "fn_count": 20,
+      "fn_urls": [
+        {
+          "url": "http://110.36.76.43:37157/bin.sh",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://95.182.98.126/mig",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://46.8.70.117/mig",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://60.22.28.117:35540/i",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://110.37.30.28:49870/i",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://45.156.24.108/ppc",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://45.156.24.108/spc",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://45.156.24.108/arm",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://45.156.24.108/mips",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://110.36.80.162:47289/i",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://42.234.233.219:46965/i",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://45.156.24.108/sh4",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://45.156.24.108/x86",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://45.156.24.108/m68k",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://45.156.24.108/mpsl",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://45.156.24.108/arm6",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://45.156.24.108/arm7",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://45.156.24.108/x86_64",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://123.5.159.237:49983/bin.sh",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://45.156.24.108/arm5",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        }
+      ]
+    }
+  },
+  "per_reason_code": {
+    "EXTERNAL_FEED_HIT": {
+      "benign_hits": 1,
+      "malicious_hits": 0,
+      "signal_ratio": 0.0
+    },
+    "SENSITIVE_PAGE_VERIFICATION_UNAVAILABLE": {
+      "benign_hits": 3,
+      "malicious_hits": 0,
+      "signal_ratio": 0.0
+    },
+    "CREDENTIAL_SINK_HIDDEN_MIRROR": {
+      "benign_hits": 1,
+      "malicious_hits": 0,
+      "signal_ratio": 0.0
+    }
+  },
+  "latency_ms": {
+    "count": 40,
+    "p50": 515,
+    "p95": 6152,
+    "p99": 6395,
+    "max": 6395
+  }
+}

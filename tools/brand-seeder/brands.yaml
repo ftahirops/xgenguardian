@@ -1,0 +1,768 @@
+brands:
+- name: PayPal
+  canonical_domains:
+  - paypal.com
+  - paypalobjects.com
+  - paypal.me
+  login_urls:
+  - https://www.paypal.com/signin
+  - https://www.paypal.com/
+  keywords:
+  - paypal
+  expected_issuer: DigiCert
+- name: Stripe
+  canonical_domains:
+  - stripe.com
+  - stripe.network
+  login_urls:
+  - https://dashboard.stripe.com/login
+  - https://stripe.com/
+  keywords:
+  - stripe
+  expected_issuer: Let's Encrypt
+- name: Chase
+  canonical_domains:
+  - chase.com
+  - jpmorganchase.com
+  login_urls:
+  - https://secure01a.chase.com/web/auth/dashboard
+  - https://www.chase.com/
+  keywords:
+  - chase
+  - jpmorgan
+  expected_issuer: DigiCert
+- name: Bank of America
+  canonical_domains:
+  - bankofamerica.com
+  - bofa.com
+  login_urls:
+  - https://secure.bankofamerica.com/login/sign-in/signOnV2Screen.go
+  - https://www.bankofamerica.com/
+  keywords:
+  - bankofamerica
+  - bofa
+  expected_issuer: DigiCert
+- name: Wells Fargo
+  canonical_domains:
+  - wellsfargo.com
+  - wf.com
+  login_urls:
+  - https://connect.secure.wellsfargo.com/auth/login
+  - https://www.wellsfargo.com/
+  keywords:
+  - wellsfargo
+  expected_issuer: DigiCert
+- name: Citi
+  canonical_domains:
+  - citi.com
+  - citigroup.com
+  - citibank.com
+  login_urls:
+  - https://online.citi.com/US/login.do
+  - https://www.citi.com/
+  keywords:
+  - citi
+  - citibank
+  - citigroup
+  expected_issuer: DigiCert
+- name: HSBC
+  canonical_domains:
+  - hsbc.com
+  - hsbc.com.hk
+  - hsbc.co.uk
+  login_urls:
+  - https://www.hsbc.com.hk/credit-cards/login/
+  - https://www.hsbc.com/
+  keywords:
+  - hsbc
+  expected_issuer: DigiCert
+- name: American Express
+  canonical_domains:
+  - americanexpress.com
+  - amex.com
+  login_urls:
+  - https://www.americanexpress.com/en-us/account/login
+  - https://www.americanexpress.com/
+  keywords:
+  - amex
+  - americanexpress
+  expected_issuer: DigiCert
+- name: Coinbase
+  canonical_domains:
+  - coinbase.com
+  login_urls:
+  - https://www.coinbase.com/signin
+  - https://www.coinbase.com/
+  keywords:
+  - coinbase
+  expected_issuer: DigiCert
+- name: Binance
+  canonical_domains:
+  - binance.com
+  - binance.us
+  login_urls:
+  - https://accounts.binance.com/en/login
+  - https://www.binance.com/
+  keywords:
+  - binance
+  expected_issuer: GTS
+- name: Google
+  canonical_domains:
+  - google.com
+  - gmail.com
+  - googleapis.com
+  - googleusercontent.com
+  login_urls:
+  - https://accounts.google.com/signin
+  - https://mail.google.com/
+  keywords:
+  - google
+  - gmail
+  expected_issuer: GTS
+- name: Microsoft
+  canonical_domains:
+  - microsoft.com
+  - microsoftonline.com
+  - live.com
+  - outlook.com
+  - office.com
+  - office365.com
+  login_urls:
+  - https://login.microsoftonline.com/
+  - https://outlook.live.com/
+  keywords:
+  - microsoft
+  - msft
+  - outlook
+  expected_issuer: Microsoft
+- name: Apple
+  canonical_domains:
+  - apple.com
+  - icloud.com
+  - me.com
+  login_urls:
+  - https://appleid.apple.com/sign-in
+  - https://www.icloud.com/
+  keywords:
+  - apple
+  - icloud
+  expected_issuer: Apple
+- name: Amazon
+  canonical_domains:
+  - amazon.com
+  - amazon.co.uk
+  - amazon.de
+  - amazon.in
+  login_urls:
+  - https://www.amazon.com/ap/signin
+  - https://www.amazon.com/
+  keywords:
+  - amazon
+  expected_issuer: DigiCert
+- name: AWS
+  canonical_domains:
+  - aws.amazon.com
+  - amazonaws.com
+  - awsstatic.com
+  login_urls:
+  - https://signin.aws.amazon.com/signin
+  - https://aws.amazon.com/console/
+  keywords:
+  - aws
+  - aws-console
+  - amazonaws
+  expected_issuer: Amazon
+- name: Azure
+  canonical_domains:
+  - azure.com
+  - microsoft.com
+  - microsoftonline.com
+  login_urls:
+  - https://portal.azure.com/
+  - https://azure.microsoft.com/
+  keywords:
+  - azure
+  - azure-portal
+  expected_issuer: Microsoft
+- name: GitHub
+  canonical_domains:
+  - github.com
+  - githubusercontent.com
+  - githubassets.com
+  login_urls:
+  - https://github.com/login
+  - https://github.com/
+  keywords:
+  - github
+  expected_issuer: DigiCert
+- name: GitLab
+  canonical_domains:
+  - gitlab.com
+  login_urls:
+  - https://gitlab.com/users/sign_in
+  - https://gitlab.com/
+  keywords:
+  - gitlab
+  expected_issuer: Let's Encrypt
+- name: Dropbox
+  canonical_domains:
+  - dropbox.com
+  - dropboxstatic.com
+  login_urls:
+  - https://www.dropbox.com/login
+  - https://www.dropbox.com/
+  keywords:
+  - dropbox
+  expected_issuer: DigiCert
+- name: Box
+  canonical_domains:
+  - box.com
+  - boxcdn.net
+  login_urls:
+  - https://account.box.com/login
+  - https://www.box.com/
+  keywords:
+  - box
+  expected_issuer: DigiCert
+- name: Adobe
+  canonical_domains:
+  - adobe.com
+  - adobelogin.com
+  login_urls:
+  - https://auth.services.adobe.com/
+  - https://www.adobe.com/
+  keywords:
+  - adobe
+  - adobe-cc
+  - creativecloud
+  expected_issuer: DigiCert
+- name: Atlassian
+  canonical_domains:
+  - atlassian.com
+  - atlassian.net
+  login_urls:
+  - https://id.atlassian.com/login
+  - https://www.atlassian.com/
+  keywords:
+  - atlassian
+  - jira
+  - confluence
+  - bitbucket
+  expected_issuer: DigiCert
+- name: Slack
+  canonical_domains:
+  - slack.com
+  - slack-edge.com
+  login_urls:
+  - https://slack.com/signin
+  - https://slack.com/
+  keywords:
+  - slack
+  expected_issuer: DigiCert
+- name: Microsoft Teams
+  canonical_domains:
+  - teams.microsoft.com
+  - teams.live.com
+  login_urls:
+  - https://teams.microsoft.com/
+  keywords:
+  - teams
+  - ms-teams
+  - microsoft-teams
+  expected_issuer: Microsoft
+- name: Zoom
+  canonical_domains:
+  - zoom.us
+  - zoom.com
+  login_urls:
+  - https://zoom.us/signin
+  - https://zoom.us/
+  keywords:
+  - zoom
+  expected_issuer: DigiCert
+- name: Webex
+  canonical_domains:
+  - webex.com
+  - ciscospark.com
+  login_urls:
+  - https://web.webex.com/
+  keywords:
+  - webex
+  - cisco
+  expected_issuer: DigiCert
+- name: Notion
+  canonical_domains:
+  - notion.so
+  - notion.site
+  - notion.com
+  login_urls:
+  - https://www.notion.so/login
+  - https://www.notion.so/
+  keywords:
+  - notion
+  expected_issuer: Let's Encrypt
+- name: Discord
+  canonical_domains:
+  - discord.com
+  - discordapp.com
+  login_urls:
+  - https://discord.com/login
+  - https://discord.com/
+  keywords:
+  - discord
+  expected_issuer: Cloudflare
+- name: Telegram
+  canonical_domains:
+  - telegram.org
+  - telegram.me
+  - t.me
+  login_urls:
+  - https://web.telegram.org/
+  keywords:
+  - telegram
+  expected_issuer: Let's Encrypt
+- name: WhatsApp
+  canonical_domains:
+  - whatsapp.com
+  - wa.me
+  login_urls:
+  - https://web.whatsapp.com/
+  keywords:
+  - whatsapp
+  expected_issuer: DigiCert
+- name: Facebook
+  canonical_domains:
+  - facebook.com
+  - fb.com
+  - messenger.com
+  login_urls:
+  - https://www.facebook.com/login
+  - https://www.facebook.com/
+  keywords:
+  - facebook
+  expected_issuer: DigiCert
+- name: Instagram
+  canonical_domains:
+  - instagram.com
+  login_urls:
+  - https://www.instagram.com/accounts/login/
+  - https://www.instagram.com/
+  keywords:
+  - instagram
+  expected_issuer: DigiCert
+- name: LinkedIn
+  canonical_domains:
+  - linkedin.com
+  - licdn.com
+  login_urls:
+  - https://www.linkedin.com/login
+  - https://www.linkedin.com/
+  keywords:
+  - linkedin
+  expected_issuer: DigiCert
+- name: Twitter / X
+  canonical_domains:
+  - x.com
+  - twitter.com
+  - t.co
+  login_urls:
+  - https://x.com/login
+  - https://x.com/
+  keywords:
+  - twitter
+  - x.com
+  expected_issuer: DigiCert
+- name: TikTok
+  canonical_domains:
+  - tiktok.com
+  - byteoversea.com
+  login_urls:
+  - https://www.tiktok.com/login
+  - https://www.tiktok.com/
+  keywords:
+  - tiktok
+  expected_issuer: DigiCert
+- name: Reddit
+  canonical_domains:
+  - reddit.com
+  - redditmedia.com
+  login_urls:
+  - https://www.reddit.com/login
+  - https://www.reddit.com/
+  keywords:
+  - reddit
+  expected_issuer: Cloudflare
+- name: Snapchat
+  canonical_domains:
+  - snapchat.com
+  - snap.com
+  login_urls:
+  - https://accounts.snapchat.com/accounts/login
+  - https://www.snapchat.com/
+  keywords:
+  - snapchat
+  expected_issuer: DigiCert
+- name: Pinterest
+  canonical_domains:
+  - pinterest.com
+  login_urls:
+  - https://www.pinterest.com/login/
+  - https://www.pinterest.com/
+  keywords:
+  - pinterest
+  expected_issuer: DigiCert
+- name: eBay
+  canonical_domains:
+  - ebay.com
+  - ebay.co.uk
+  - ebay.de
+  login_urls:
+  - https://signin.ebay.com/
+  - https://www.ebay.com/
+  keywords:
+  - ebay
+  expected_issuer: DigiCert
+- name: Shopify
+  canonical_domains:
+  - shopify.com
+  - myshopify.com
+  login_urls:
+  - https://accounts.shopify.com/store-login
+  - https://www.shopify.com/
+  keywords: []
+  expected_issuer: DigiCert
+- name: Walmart
+  canonical_domains:
+  - walmart.com
+  - walmartimages.com
+  login_urls:
+  - https://www.walmart.com/account/login
+  - https://www.walmart.com/
+  keywords:
+  - walmart
+  expected_issuer: DigiCert
+- name: DHL
+  canonical_domains:
+  - dhl.com
+  - dhl.de
+  login_urls:
+  - https://www.dhl.com/in-en/home/tracking.html
+  - https://www.dhl.com/
+  keywords:
+  - dhl
+  expected_issuer: DigiCert
+- name: FedEx
+  canonical_domains:
+  - fedex.com
+  login_urls:
+  - https://www.fedex.com/secure-login/
+  - https://www.fedex.com/
+  keywords:
+  - fedex
+  expected_issuer: DigiCert
+- name: UPS
+  canonical_domains:
+  - ups.com
+  login_urls:
+  - https://www.ups.com/lasso/login
+  - https://www.ups.com/
+  keywords:
+  - ups
+  expected_issuer: DigiCert
+- name: Salesforce
+  canonical_domains:
+  - salesforce.com
+  - force.com
+  - salesforce-experience.com
+  login_urls:
+  - https://login.salesforce.com/
+  - https://www.salesforce.com/
+  keywords:
+  - salesforce
+  expected_issuer: DigiCert
+- name: Okta
+  canonical_domains:
+  - okta.com
+  - oktapreview.com
+  - oktacdn.com
+  login_urls:
+  - https://www.okta.com/login/
+  - https://www.okta.com/
+  keywords:
+  - okta
+  expected_issuer: DigiCert
+- name: Zoho
+  canonical_domains:
+  - zoho.com
+  - zoho.eu
+  - zohopublic.com
+  login_urls:
+  - https://accounts.zoho.com/signin
+  - https://www.zoho.com/
+  keywords:
+  - zoho
+  expected_issuer: Let's Encrypt
+- name: DocuSign
+  canonical_domains:
+  - docusign.com
+  - docusign.net
+  login_urls:
+  - https://account.docusign.com/
+  - https://www.docusign.com/
+  keywords:
+  - docusign
+  expected_issuer: DigiCert
+- name: HubSpot
+  canonical_domains:
+  - hubspot.com
+  - hs-sites.com
+  - hubspotusercontent.com
+  login_urls:
+  - https://app.hubspot.com/login
+  - https://www.hubspot.com/
+  keywords:
+  - hubspot
+  expected_issuer: DigiCert
+- name: ServiceNow
+  canonical_domains:
+  - servicenow.com
+  - service-now.com
+  login_urls:
+  - https://signon.service-now.com/
+  - https://www.servicenow.com/
+  keywords: []
+  expected_issuer: DigiCert
+
+# === Phase 2 brand expansion (2026-05-27) ===
+# Added to push TP rate on OpenPhish corpus. Focus on high-impersonation
+# targets: regional banks, crypto exchanges, courier tracking, gaming, mail.
+
+# --- Crypto exchanges + wallets (heavily impersonated) ---
+- name: Kraken
+  canonical_domains: [kraken.com, kraken.io]
+  login_urls: [https://www.kraken.com/sign-in, https://www.kraken.com/]
+  keywords: [kraken]
+- name: KuCoin
+  canonical_domains: [kucoin.com]
+  login_urls: [https://www.kucoin.com/account/signin, https://www.kucoin.com/]
+  keywords: [kucoin]
+- name: Crypto.com
+  canonical_domains: [crypto.com]
+  login_urls: [https://crypto.com/login, https://crypto.com/]
+  keywords: [crypto.com]
+- name: OKX
+  canonical_domains: [okx.com, okex.com]
+  login_urls: [https://www.okx.com/account/login, https://www.okx.com/]
+  keywords: [okx, okex]
+- name: Bybit
+  canonical_domains: [bybit.com]
+  login_urls: [https://www.bybit.com/en/login, https://www.bybit.com/]
+  keywords: [bybit]
+- name: Bitget
+  canonical_domains: [bitget.com]
+  login_urls: [https://www.bitget.com/login, https://www.bitget.com/]
+  keywords: [bitget]
+- name: Gate.io
+  canonical_domains: [gate.io, gateio.ws]
+  login_urls: [https://www.gate.io/login, https://www.gate.io/]
+  keywords: [gate.io, gateio]
+- name: MetaMask
+  canonical_domains: [metamask.io]
+  login_urls: [https://metamask.io/]
+  keywords: [metamask]
+- name: Trust Wallet
+  canonical_domains: [trustwallet.com]
+  login_urls: [https://trustwallet.com/]
+  keywords: [trust wallet, trustwallet]
+- name: Ledger
+  canonical_domains: [ledger.com]
+  login_urls: [https://www.ledger.com/, https://shop.ledger.com/]
+  keywords: [ledger]
+- name: Trezor
+  canonical_domains: [trezor.io]
+  login_urls: [https://trezor.io/]
+  keywords: [trezor]
+- name: SwissBorg
+  canonical_domains: [swissborg.com]
+  login_urls: [https://swissborg.com/login, https://swissborg.com/]
+  keywords: [swissborg]
+
+# --- Regional banks (top impersonation targets) ---
+- name: Barclays
+  canonical_domains: [barclays.co.uk, barclays.com]
+  login_urls: [https://bank.barclays.co.uk/olb/auth/LoginLink.action, https://www.barclays.co.uk/]
+  keywords: [barclays]
+- name: Lloyds
+  canonical_domains: [lloydsbank.com, lloydsbank.co.uk]
+  login_urls: [https://online.lloydsbank.co.uk/personal/logon/login.jsp, https://www.lloydsbank.com/]
+  keywords: [lloyds]
+- name: NatWest
+  canonical_domains: [natwest.com]
+  login_urls: [https://www.natwest.com/personal.html]
+  keywords: [natwest]
+- name: Santander
+  canonical_domains: [santander.com, santander.co.uk, santander.es]
+  login_urls: [https://www.santander.com/, https://www.santander.co.uk/]
+  keywords: [santander]
+- name: ING
+  canonical_domains: [ing.com, ing.nl, ing.de]
+  login_urls: [https://mijn.ing.nl/login/, https://www.ing.com/]
+  keywords: [ing]
+- name: Deutsche Bank
+  canonical_domains: [deutsche-bank.de, db.com]
+  login_urls: [https://meine.deutsche-bank.de/trxm/db/, https://www.db.com/]
+  keywords: [deutsche bank, deutschebank]
+- name: BNP Paribas
+  canonical_domains: [bnpparibas.com, bnpparibas.fr]
+  login_urls: [https://www.bnpparibas.com/]
+  keywords: [bnp paribas, bnpparibas]
+- name: Credit Suisse
+  canonical_domains: [credit-suisse.com]
+  login_urls: [https://www.credit-suisse.com/]
+  keywords: [credit suisse]
+- name: UBS
+  canonical_domains: [ubs.com]
+  login_urls: [https://www.ubs.com/]
+  keywords: [ubs]
+- name: RBC
+  canonical_domains: [rbc.com, rbcroyalbank.com]
+  login_urls: [https://www.rbcroyalbank.com/personal.html]
+  keywords: [rbc, royal bank of canada]
+- name: TD Bank
+  canonical_domains: [td.com, tdbank.com]
+  login_urls: [https://www.td.com/, https://www.tdbank.com/]
+  keywords: [td bank, td canada]
+- name: Capital One
+  canonical_domains: [capitalone.com]
+  login_urls: [https://verified.capitalone.com/auth/signin, https://www.capitalone.com/]
+  keywords: [capital one, capitalone]
+- name: USAA
+  canonical_domains: [usaa.com]
+  login_urls: [https://www.usaa.com/inet/wc/logon_login]
+  keywords: [usaa]
+
+# --- Couriers + Postal (consistently top 5 phishing targets) ---
+- name: USPS
+  canonical_domains: [usps.com]
+  login_urls: [https://www.usps.com/, https://reg.usps.com/]
+  keywords: [usps, united states postal]
+- name: Royal Mail
+  canonical_domains: [royalmail.com]
+  login_urls: [https://www.royalmail.com/]
+  keywords: [royal mail, royalmail]
+- name: Australia Post
+  canonical_domains: [auspost.com.au]
+  login_urls: [https://auspost.com.au/]
+  keywords: [australia post, auspost]
+- name: Canada Post
+  canonical_domains: [canadapost-postescanada.ca, canadapost.ca]
+  login_urls: [https://www.canadapost-postescanada.ca/]
+  keywords: [canada post, postescanada]
+- name: La Poste
+  canonical_domains: [laposte.fr]
+  login_urls: [https://www.laposte.fr/]
+  keywords: [la poste, laposte]
+- name: Deutsche Post / DHL
+  canonical_domains: [deutschepost.de]
+  login_urls: [https://www.deutschepost.de/]
+  keywords: [deutsche post, deutschepost]
+- name: PostNL
+  canonical_domains: [postnl.nl]
+  login_urls: [https://www.postnl.nl/]
+  keywords: [postnl]
+- name: DPD
+  canonical_domains: [dpd.com, dpd.co.uk]
+  login_urls: [https://www.dpd.com/, https://www.dpd.co.uk/]
+  keywords: [dpd]
+- name: Correos
+  canonical_domains: [correos.es]
+  login_urls: [https://www.correos.es/]
+  keywords: [correos]
+
+# --- Payment apps ---
+- name: Venmo
+  canonical_domains: [venmo.com]
+  login_urls: [https://venmo.com/account/sign-in, https://venmo.com/]
+  keywords: [venmo]
+- name: Cash App
+  canonical_domains: [cash.app, cashapp.com]
+  login_urls: [https://cash.app/]
+  keywords: [cash app, cashapp, $cashtag]
+- name: Zelle
+  canonical_domains: [zellepay.com]
+  login_urls: [https://www.zellepay.com/]
+  keywords: [zelle]
+- name: Wise
+  canonical_domains: [wise.com, transferwise.com]
+  login_urls: [https://wise.com/login, https://wise.com/]
+  keywords: [wise, transferwise]
+- name: Revolut
+  canonical_domains: [revolut.com]
+  login_urls: [https://www.revolut.com/, https://app.revolut.com/]
+  keywords: [revolut]
+- name: Klarna
+  canonical_domains: [klarna.com]
+  login_urls: [https://www.klarna.com/, https://app.klarna.com/]
+  keywords: [klarna]
+
+# --- Streaming + Gaming (phishing for stolen subscription credentials) ---
+- name: Netflix
+  canonical_domains: [netflix.com]
+  login_urls: [https://www.netflix.com/login, https://www.netflix.com/]
+  keywords: [netflix]
+- name: Spotify
+  canonical_domains: [spotify.com]
+  login_urls: [https://accounts.spotify.com/en/login, https://www.spotify.com/]
+  keywords: [spotify]
+- name: Disney+
+  canonical_domains: [disneyplus.com]
+  login_urls: [https://www.disneyplus.com/login, https://www.disneyplus.com/]
+  keywords: [disney+, disneyplus]
+- name: Steam
+  canonical_domains: [steampowered.com, steamcommunity.com]
+  login_urls: [https://store.steampowered.com/login/, https://steamcommunity.com/]
+  keywords: [steam]
+- name: Roblox
+  canonical_domains: [roblox.com]
+  login_urls: [https://www.roblox.com/login, https://www.roblox.com/]
+  keywords: [roblox, robux]
+- name: Epic Games
+  canonical_domains: [epicgames.com]
+  login_urls: [https://www.epicgames.com/id/login, https://www.epicgames.com/]
+  keywords: [epic games, epicgames]
+- name: Discord
+  canonical_domains: [discord.com, discordapp.com]
+  login_urls: [https://discord.com/login, https://discord.com/]
+  keywords: [discord]
+- name: Twitch
+  canonical_domains: [twitch.tv]
+  login_urls: [https://www.twitch.tv/login, https://www.twitch.tv/]
+  keywords: [twitch]
+
+# --- Mail providers ---
+- name: Yahoo Mail
+  canonical_domains: [yahoo.com, mail.yahoo.com]
+  login_urls: [https://login.yahoo.com/, https://www.yahoo.com/]
+  keywords: [yahoo, ymail]
+- name: ProtonMail
+  canonical_domains: [proton.me, protonmail.com]
+  login_urls: [https://account.proton.me/login, https://proton.me/]
+  keywords: [proton, protonmail]
+- name: Tutanota
+  canonical_domains: [tuta.com, tutanota.com]
+  login_urls: [https://app.tuta.com/, https://tuta.com/]
+  keywords: [tuta, tutanota]
+- name: Yandex
+  canonical_domains: [yandex.com, yandex.ru]
+  login_urls: [https://passport.yandex.com/auth, https://yandex.com/]
+  keywords: [yandex]
+
+# --- Crypto adjacent / Web3 ---
+- name: OpenSea
+  canonical_domains: [opensea.io]
+  login_urls: [https://opensea.io/login, https://opensea.io/]
+  keywords: [opensea]
+- name: Uniswap
+  canonical_domains: [uniswap.org, app.uniswap.org]
+  login_urls: [https://app.uniswap.org/]
+  keywords: [uniswap]

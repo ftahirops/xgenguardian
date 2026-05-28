@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  go-build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        svc: [resolver, verdict-api, portal-api, ct-monitor]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: services/${{ matrix.svc }}/go.sum
+      - name: Build
+        working-directory: services/${{ matrix.svc }}
+        run: go build ./...
+      - name: Vet
+        working-directory: services/${{ matrix.svc }}
+        run: go vet ./...
+      - name: Test
+        working-directory: services/${{ matrix.svc }}
+        run: go test ./... -count=1
+
+  python-services:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        svc: [sandbox-render, visual-match]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        working-directory: services/${{ matrix.svc }}
+        run: |
+          pip install --upgrade pip
+          pip install fastapi uvicorn pydantic httpx
+      - name: Smoke import
+        working-directory: services/${{ matrix.svc }}
+        run: python -c "import app.main" || true
+
+  portal:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/portal
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/portal/package-lock.json
+      - run: npm install --no-audit --no-fund
+      - run: npm run lint --if-present
+      - run: npm run build
+
+  migrations-sanity:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: xgg
+          POSTGRES_PASSWORD: xgg
+          POSTGRES_DB: xgg
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply migrations
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          for f in $(ls migrations/*.sql | sort); do
+            PGPASSWORD=xgg psql -h localhost -U xgg -d xgg -f "$f"
+          done

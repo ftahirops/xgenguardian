@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>XGenGuardian</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0; width: 320px; padding: 16px;
+      font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      background: #0a0c11; color: #e8eaed; font-size: 14px;
+    }
+    h1 { margin: 0 0 4px; font-size: 16px; }
+    .sub { color: #9aa3b2; font-size: 12px; }
+    .pill {
+      display: inline-block; padding: 2px 10px; border-radius: 999px;
+      font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .clean { background:#0d2a13; color:#52c41a; }
+    .warn  { background:#3a2a0c; color:#faad14; }
+    .block { background:#3a1014; color:#ff6b6b; }
+    .unk   { background:#1a1d27; color:#9aa3b2; }
+    .row { margin-top: 14px; }
+    .label { color:#9aa3b2; font-size: 11px; text-transform: uppercase; letter-spacing:0.4px; }
+    .value { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; font-size: 12px; color: #cfd4dd; }
+    a.cta { display:block; margin-top:18px; padding: 8px 12px; background:#5e8bff; color:white; text-decoration:none; text-align:center; border-radius:6px; font-weight:600; }
+    a.link { color:#5e8bff; font-size:12px; text-decoration:none; }
+    label { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #cfd4dd; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <h1>XGenGuardian</h1>
+  <div class="sub">Current tab</div>
+
+  <div class="row">
+    <span id="badge" class="pill unk">unknown</span>
+    <span id="conf" class="sub" style="margin-left:8px"></span>
+  </div>
+
+  <div class="row">
+    <div class="label">URL</div>
+    <div id="url" class="value"></div>
+  </div>
+
+  <div class="row" id="brandRow" hidden>
+    <div class="label">Visually similar to</div>
+    <div class="value"><span id="brand"></span> · <span id="score"></span></div>
+  </div>
+
+  <label>
+    <input type="checkbox" id="enabled" />
+    Protection enabled
+  </label>
+
+  <a class="cta" id="evidence" href="#" target="_blank">View full evidence →</a>
+  <p style="margin-top:14px; text-align:center;">
+    <a class="link" id="options" href="#">Settings</a>
+  </p>
+
+  <script src="popup.js"></script>
+</body>
+</html>

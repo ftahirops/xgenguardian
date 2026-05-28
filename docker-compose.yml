@@ -1,0 +1,42 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: xgg
+      POSTGRES_PASSWORD: xgg
+      POSTGRES_DB: xgg
+    ports:
+      - "127.0.0.1:15432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:16379:6379"
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: xggadmin
+      MINIO_ROOT_PASSWORD: xggadmin123
+    ports:
+      - "127.0.0.1:19000:9000"
+      - "127.0.0.1:19001:9001"
+    volumes:
+      - miniodata:/data
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on: [minio]
+    entrypoint: >
+      /bin/sh -c "
+      until /usr/bin/mc alias set local http://minio:9000 xggadmin xggadmin123; do sleep 1; done;
+      /usr/bin/mc mb -p local/xgg-evidence || true;
+      /usr/bin/mc anonymous set download local/xgg-evidence;
+      "
+
+volumes:
+  pgdata:
+  miniodata:

@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package xgg.verdict.v1;
+
+option go_package = "github.com/xgenguardian/proto/verdict/v1;verdictv1";
+
+service Verdict {
+  // CheckURL returns a verdict for a full URL.
+  // Called inline by the resolver (when URL context is available via extension)
+  // and by the Transparency Portal.
+  rpc CheckURL   (CheckURLRequest)   returns (CheckURLResponse);
+
+  // CheckDomain returns a verdict for a bare domain.
+  // Called by the DoH/DoT resolver on every query (cache miss).
+  rpc CheckDomain (CheckDomainRequest) returns (CheckDomainResponse);
+
+  // RescanURL forces a fresh scan, bypassing cache.
+  rpc RescanURL (RescanURLRequest) returns (CheckURLResponse);
+}
+
+// ---------- requests ----------
+
+message CheckURLRequest {
+  string url             = 1;
+  string client_id       = 2;  // tenant or anonymous identifier
+  bool   force_rescan    = 3;
+  bool   include_evidence = 4; // include screenshot URLs etc.
+}
+
+message CheckDomainRequest {
+  string domain    = 1;
+  string client_id = 2;
+}
+
+message RescanURLRequest {
+  string url       = 1;
+  string client_id = 2;
+}
+
+// ---------- responses ----------
+
+enum VerdictKind {
+  VERDICT_UNSPECIFIED = 0;
+  VERDICT_CLEAN       = 1;
+  VERDICT_WARN        = 2;
+  VERDICT_BLOCK       = 3;
+  VERDICT_ANALYZING   = 4; // Tier-2 in progress; client should poll or wait
+}
+
+message Signal {
+  string name        = 1; // e.g. "nrd_24h", "homoglyph_match", "visual_similarity"
+  double weight      = 2;
+  string detail      = 3; // human-readable
+}
+
+message CheckURLResponse {
+  VerdictKind verdict           = 1;
+  double      confidence        = 2; // 0..1
+  string      evidence_id       = 3;
+  repeated Signal signals       = 4;
+  string      llm_explanation   = 5;
+  string      visual_top_brand  = 6;
+  double      visual_top_score  = 7;
+  int64       scanned_at_unix   = 8;
+  int64       cache_ttl_seconds = 9;
+
+  // Populated only on VERDICT_BLOCK
+  string      block_reason      = 10;
+  string      screenshot_url    = 11;
+}
+
+message CheckDomainResponse {
+  VerdictKind verdict        = 1;
+  double      confidence     = 2;
+  repeated Signal signals    = 3;
+  string      sinkhole_target = 4; // CNAME to interstitial during ANALYZING
+}

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>XGenGuardian — Settings</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, sans-serif; background:#0a0c11; color:#e8eaed; }
+    main { max-width: 640px; margin: 64px auto; padding: 0 24px; }
+    h1 { font-size: 24px; }
+    .field { margin-top: 24px; }
+    .field label { display:block; font-size: 13px; color:#9aa3b2; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom:6px; }
+    input[type=text], input[type=url] {
+      width: 100%; padding: 10px 12px; background: #11141d; color: inherit;
+      border: 1px solid #2a3142; border-radius: 6px; font-size: 14px;
+    }
+    .check { display:flex; align-items:center; gap:10px; margin-top: 16px; }
+    button { margin-top: 28px; padding: 10px 18px; background: #5e8bff; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; }
+    .saved { margin-left: 12px; color: #52c41a; opacity: 0; transition: opacity 0.3s; }
+    .saved.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>XGenGuardian Settings</h1>
+
+    <div class="field">
+      <label for="apiBase">Verdict API endpoint</label>
+      <input type="url" id="apiBase" placeholder="https://api.xgenguardian.com" />
+      <small style="color:#6f7787">Change only if you self-host or use a regional endpoint.</small>
+    </div>
+
+    <div class="field">
+      <label for="portalApiBase">Evidence (portal-api) endpoint</label>
+      <input type="url" id="portalApiBase" placeholder="https://api.xgenguardian.com" />
+      <small style="color:#6f7787">The block page fetches deep evidence from this server. Usually the same as the verdict API.</small>
+    </div>
+
+    <div class="check">
+      <input type="checkbox" id="enabled" />
+      <label for="enabled">Protection enabled</label>
+    </div>
+
+    <div class="check">
+      <input type="checkbox" id="enforceWarn" />
+      <label for="enforceWarn">Also block WARN-level pages (stricter)</label>
+    </div>
+
+    <div class="check">
+      <input type="checkbox" id="telemetry" />
+      <label for="telemetry">Share anonymous block telemetry to improve detection</label>
+    </div>
+
+    <div class="field" style="margin-top: 40px; padding: 20px; border: 1px solid #2a3142; border-radius: 8px; background: #0d1018;">
+      <label style="color:#6bb0ff;">Executive Mode</label>
+      <div style="color:#bcc3d0; font-size: 13px; margin: 8px 0 16px;">
+        Only sites with confirmed clean history (grade A or A+) load directly.
+        Everything else opens in isolation. Reduces unknown-site risk by roughly
+        7 percentage points at the cost of more interstitials.
+        Recommended for executives, journalists, IR analysts.
+        <br /><br />
+        <strong style="color:#ffc56b;">First 24 hours after enabling:</strong>
+        a warm-up window keeps lightly-trusted sites loading normally while your
+        personal cache populates.
+      </div>
+      <div class="check">
+        <input type="checkbox" id="paranoidMode" />
+        <label for="paranoidMode">Enable Executive Mode</label>
+      </div>
+    </div>
+
+    <button id="save">Save</button>
+    <span class="saved" id="saved">Saved.</span>
+  </main>
+
+  <script src="options.js"></script>
+</body>
+</html>

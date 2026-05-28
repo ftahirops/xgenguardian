@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Blocked by XGenGuardian</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      background: #0a0c11;
+      color: #e8eaed;
+      line-height: 1.55;
+    }
+    .wrap { max-width: 880px; margin: 56px auto; padding: 0 24px; }
+    h1 { font-size: 30px; margin: 0 0 8px; }
+    h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0.6px; color: #9aa3b2; margin: 32px 0 10px; }
+    .pill {
+      display: inline-block; background: #3b1115; color: #ff6b6b;
+      font-weight: 700; padding: 4px 12px; border-radius: 999px;
+      font-size: 12px; letter-spacing: 0.5px; text-transform: uppercase;
+    }
+    .grade {
+      display: inline-block; margin-left: 8px; padding: 4px 12px;
+      background: #1a0d0d; color: #ff8c8c; border-radius: 999px;
+      font-weight: 700; font-size: 12px; letter-spacing: 0.5px;
+    }
+    .panel {
+      margin-top: 16px; padding: 18px 20px;
+      background: #11141d; border: 1px solid #2a3142; border-radius: 12px;
+    }
+    .row { display: grid; grid-template-columns: 180px 1fr; gap: 12px; padding: 8px 0; }
+    .row + .row { border-top: 1px solid #1a1f2c; }
+    .label { color: #9aa3b2; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; padding-top: 2px; }
+    .value { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; font-size: 13px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+
+    .signal {
+      margin-top: 10px; padding: 12px 14px;
+      background: #11141d; border-left: 3px solid #ff6b6b; border-radius: 6px;
+    }
+    .signal.sev-medium  { border-left-color: #faad14; }
+    .signal.sev-low     { border-left-color: #5e8bff; }
+    .signal.sev-critical { border-left-color: #ff4d4f; background: #1a0d0d; }
+    .signal-code { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: #6f7787; text-transform: uppercase; letter-spacing: 0.3px; }
+    .signal-title { font-weight: 600; margin-top: 4px; font-size: 15px; }
+    .signal-body  { color: #bcc3d0; font-size: 13px; margin-top: 4px; }
+    .signal-weight { float: right; font-size: 11px; color: #9aa3b2; }
+
+    .redirect-step { padding: 4px 0; }
+    .redirect-arrow { color: #5e8bff; margin: 0 6px; }
+
+    .ext-tag {
+      display: inline-block; padding: 2px 8px; margin: 2px 4px 2px 0;
+      background: #2a1a1a; color: #ff8c8c; border-radius: 4px;
+      font-family: ui-monospace, Menlo, monospace; font-size: 11px;
+    }
+
+    .actions { margin-top: 28px; display: flex; gap: 12px; flex-wrap: wrap; }
+    .btn { padding: 10px 18px; border-radius: 8px; text-decoration: none; font-weight: 600; cursor: pointer; border: 0; }
+    .primary { background: #5e8bff; color: white; }
+    .ghost   { background: transparent; border: 1px solid #2a3142; color: #cfd4dd; }
+    .danger  { background: transparent; border: 1px solid #553030; color: #ff8c8c; }
+
+    .screenshot {
+      width: 100%; max-height: 360px; object-fit: contain;
+      margin-top: 12px; border: 1px solid #2a3142; border-radius: 8px;
+      background: #06080c;
+    }
+
+    .loading { color: #6f7787; font-size: 13px; padding: 16px 0; }
+    .empty   { color: #6f7787; font-size: 13px; padding: 8px 0; font-style: italic; }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <div>
+      <span class="pill">Blocked</span>
+      <span class="grade" id="grade" hidden></span>
+    </div>
+    <h1 id="title">This page was blocked.</h1>
+    <p style="color:#bcc3d0; margin-top: 4px;" id="reason">
+      XGenGuardian detected high-confidence malicious indicators before your browser loaded it.
+    </p>
+
+    <h2>Where it failed</h2>
+    <div id="signals" class="loading">Fetching detailed evidence…</div>
+
+    <h2>Page identity</h2>
+    <div class="panel">
+      <div class="row"><div class="label">Requested URL</div><div class="value" id="url"></div></div>
+      <div class="row" id="finalRow" hidden><div class="label">Final URL</div><div class="value" id="finalUrl"></div></div>
+      <div class="row" id="redirectRow" hidden>
+        <div class="label">Redirect chain</div>
+        <div class="value" id="redirectChain"></div>
+      </div>
+      <div class="row" id="brandRow" hidden>
+        <div class="label">Visually impersonates</div>
+        <div class="value"><span id="brand"></span> &middot; similarity <span id="score"></span></div>
+      </div>
+      <div class="row" id="faviconRow" hidden>
+        <div class="label">Favicon matches</div>
+        <div class="value" id="favicon"></div>
+      </div>
+      <div class="row" id="pageClassRow" hidden>
+        <div class="label">Page class</div>
+        <div class="value" id="pageClass"></div>
+      </div>
+    </div>
+
+    <h2>Hosting + identity</h2>
+    <div class="panel">
+      <div class="row" id="registrarRow" hidden>
+        <div class="label">Registrar</div>
+        <div class="value" id="registrar"></div>
+      </div>
+      <div class="row" id="ageRow" hidden>
+        <div class="label">Domain age</div>
+        <div class="value" id="age"></div>
+      </div>
+      <div class="row" id="asnRow" hidden>
+        <div class="label">Hosting ASN</div>
+        <div class="value" id="asn"></div>
+      </div>
+      <div class="row" id="certRow" hidden>
+        <div class="label">TLS issuer</div>
+        <div class="value" id="cert"></div>
+      </div>
+      <div class="row" id="certHashRow" hidden>
+        <div class="label">Cert SHA-256</div>
+        <div class="value mono" id="certHash"></div>
+      </div>
+      <div class="row" id="extRow" hidden>
+        <div class="label">External feeds</div>
+        <div class="value" id="ext"></div>
+      </div>
+    </div>
+
+    <h2 id="formsHeader" hidden>Form actions extracted</h2>
+    <div class="panel" id="formsPanel" hidden>
+      <ul id="forms" class="mono"></ul>
+    </div>
+
+    <h2 id="screenshotHeader" hidden>Sandbox screenshot</h2>
+    <img id="screenshot" class="screenshot" hidden />
+
+    <div class="actions">
+      <a class="primary" href="javascript:history.back()">Go back</a>
+      <a class="ghost"   id="viewFullEvidence" target="_blank" rel="noopener">Open full report →</a>
+      <a class="danger"  id="reportFP"         target="_blank" rel="noopener">I think this is wrong</a>
+    </div>
+
+    <p style="margin-top:40px; color:#6f7787; font-size:12px;">
+      XGenGuardian &middot; evidence ID: <span class="mono" id="evidenceIdFooter"></span>
+    </p>
+  </main>
+
+  <script src="blocked.js"></script>
+</body>
+</html>

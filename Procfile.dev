@@ -1,0 +1,21 @@
+# Procfile.dev — runs every service for local internal testing.
+#
+# Use with `overmind start -f Procfile.dev` (preferred) or `foreman start -f Procfile.dev`.
+# `make dev-up` invokes overmind when present, falls back to foreman, finally
+# falls back to a tmux script.
+#
+# Port plan (simple two-public-ports setup):
+#   Public:    53/udp+tcp (resolver), 13000 (dashboard) — both locked to operator IP
+#   Localhost: 18080 verdict-api, 18081 portal-api, 8002 sandbox, 8003 visual
+#
+# Order matters: heavier services come first so they're warming up while the
+# lighter ones boot. visual-match downloads the CLIP model on first run
+# (~600 MB) so allow several minutes for the first start.
+
+visual-match:   cd services/visual-match   && uvicorn app.main:app --host 127.0.0.1 --port 8003 --reload
+sandbox-render: cd services/sandbox-render && uvicorn app.main:app --host 127.0.0.1 --port 8002 --reload
+verdict-api:    cd services/verdict-api    && SESSION_LOG_DIR=../../data/sessions HTTP_LISTEN=127.0.0.1:18080 go run ./cmd/verdict-api
+portal-api:     cd services/portal-api     && ADMIN_PASSWORD=$${ADMIN_PASSWORD:-changeme} LISTEN=127.0.0.1:18081 go run ./cmd/portal-api
+resolver:       cd services/resolver       && DNS_LISTEN_UDP=:53 DNS_LISTEN_TCP=:53 VERDICT_API_ADDR=http://127.0.0.1:18080 go run ./cmd/resolver
+ct-monitor:     cd services/ct-monitor     && go run ./cmd/ct-monitor
+portal:         cd apps/portal             && PORT=13000 npm run dev

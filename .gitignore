@@ -1,0 +1,70 @@
+# Build artifacts
+bin/
+dist/
+out/
+*.exe
+*.test
+*.out
+# Per-service compiled Go binaries (path matches service name).
+services/ct-monitor/ct-monitor
+services/verdict-api/verdict-api
+services/resolver/resolver
+services/portal-api/portal-api
+services/scheduler/scheduler
+services/healthcheck/healthcheck
+services/registry-svc/registry-svc
+
+# Go
+vendor/
+
+# Node / Next.js
+node_modules/
+.next/
+.turbo/
+*.tsbuildinfo
+.env*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+
+# Data / generated
+data/
+evidence/
+*.dump
+*.sqlite
+
+# Brand registry: manual screenshots are visual IP, keep them out of git.
+# Keep the directory itself via .gitkeep.
+tools/brand-seeder/manual/*
+!tools/brand-seeder/manual/.gitkeep
+
+# Local secrets
+*.pem
+*.key
+!tls/cert.pem.example
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# CI / coverage
+coverage.txt
+coverage.html

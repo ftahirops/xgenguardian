@@ -1,0 +1,401 @@
+{
+  "timestamp": "2026-05-27T17:20:02.533068+00:00",
+  "per_label": {
+    "benign": {
+      "total": 138,
+      "errors": 0,
+      "fp_count": 0,
+      "fp_rate": 0.0,
+      "allowed_count": 138,
+      "fp_urls": []
+    },
+    "malicious": {
+      "total": 100,
+      "errors": 0,
+      "tp_count": 48,
+      "tp_rate": 0.48,
+      "fn_count": 52,
+      "fn_urls": [
+        {
+          "url": "https://lhxly.cannatural.eu/31b18793-c225-4c9e-85ad-b15c2c83055e",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://pshcd.cannaturalgroup.com/f1c2ccfa-4dcb-4c66-a355-7b03985210ff",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://acmdo.ceremoniavezeto.hu/c1097eaa-17b5-43b0-a822-bd27ec6a065a",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://pchfp.vigaf.hu/e50808f8-9957-487d-901d-644cd955dd6f",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://vhngezbf.pleasuredome.hu/?ublib=3c19de24-b0eb-4da0-adcb-e17586d61e99",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://8riyashil.github.io/amazon.com-front-page",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://gmotkshop.com/h5/#/pages/register/register?code=MHKDE6",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://gmotkshop.com/s/MHKDE6",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://shtruz494.github.io/steam",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://apl-bootstrap-olyad-clone.netlify.app/",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://allrbxscrpt.blogspot.com/",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://kcuicoinlogoio.godaddysites.com/",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://aviralvishwakarma.github.io/AmazonClone",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://www.j70g.vip/",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://swissborg-loogin.webflow.io/",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://aprovacoestododia.s3.us-east-005.backblazeb2.com/aumento.html",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://pagamentos-freeflow.lovable.app/",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://ppp63.028426.com/s/63BZGFSVBWSFCDX7Y9/584dd8/90eab167-7429-489f-99f6-ce86e8d0d81a/",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://brt.mxvkxb.help/track-it",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://brt.dhyhde.buzz/track-it",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://rmhrestopmain.wasmer.app/preweb/js/libs/statistics/listening",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://bunmainnf.wasmer.app/",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://www.gov-parkimgf.cyou/com/",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://acn-awards.com/01KSK8WMYH3JMG2X2MGBH942K7",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://brt.fqrttv.click/track-it",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://segamarcos.info/?app_vl=ZYFwlHFpbWKEmLqxy5qmnnx0YsC2wa-TpaiVYs",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://robloxr.de/users/14085142931/profile",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://omkilkarihospital.com/aeromechanism/southpointindustrial.html",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://www.j70f.vip/",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://bhuwanyogii.github.io/AmazonFrontPage-html-css-",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://vatshalupadhyay.github.io/netflix-ui-clone/",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://ranjithakaranam.github.io/Netflix-Homepage-Project/",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://8riyashil.github.io/amazon.com-front-page/",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://smilepant.com/tools/facebook-real-name-finder/.tmps/",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://smilepant.com/tools/facebook-real-name-finder/.tmps/verif1.php",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://smilepant.com/tools/facebook-real-name-finder/.tmps/proses2.php",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://govauinboxmsg-clientsecure.com/",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://smilepant.com/tools/facebook-real-name-finder/.tmps/done.php",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://smilepant.com/tools/facebook-real-name-finder/.tmps/proses3.php",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://smilepant.com/tools/facebook-real-name-finder/.tmps/proses4.php",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://smilepant.com/tools/facebook-real-name-finder/.tmps/verif2.php",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://shravni2614.github.io/Basic-Netflix-clone-using-css-and-html",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://www.bitesr.shop/",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://9000-firebase-deskcrypt0011-1773850667186.cluster-2nmnojxdmnfh2vwda4kd7uoumu.cloudworkstations.dev/?eta=solorhub@76de844719405efb8b6c1cdeab1bb9b5ac86.com",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://upholidlognee.godaddysites.com/",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://acn-awards.com/01KSK914T5V587Z7N35FGVGV8A",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://dilkesh01.github.io/N",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://www.roblox.com.ml/games/74373578954606/Consmeow-Experience-18?privateServerLinkCode=651064153571724202468816202383",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://ipfs.io/ipfs/bafkreieubkzddveueazsanppwghu7kpir3vayxxtbcbnegawpt42u5wynq/?eta=serishub",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        },
+        {
+          "url": "http://huld-lgn-up-home.square.site/",
+          "verdict": "ALLOW",
+          "grade": "B",
+          "codes": [],
+          "page_class": "generic"
+        }
+      ]
+    }
+  },
+  "per_reason_code": {
+    "MALWARE_RAW_IP_BINARY_DROP": {
+      "benign_hits": 0,
+      "malicious_hits": 41,
+      "signal_ratio": 1.0
+    },
+    "RAW_IP_HOST": {
+      "benign_hits": 0,
+      "malicious_hits": 3,
+      "signal_ratio": 1.0
+    },
+    "EXTERNAL_FEED_HIT": {
+      "benign_hits": 0,
+      "malicious_hits": 1,
+      "signal_ratio": 1.0
+    },
+    "SENSITIVE_PAGE_VERIFICATION_UNAVAILABLE": {
+      "benign_hits": 0,
+      "malicious_hits": 3,
+      "signal_ratio": 1.0
+    }
+  },
+  "latency_ms": {
+    "count": 238,
+    "p50": 230,
+    "p95": 6211,
+    "p99": 8005,
+    "max": 8014
+  }
+}

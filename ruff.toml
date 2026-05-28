@@ -1,0 +1,23 @@
+# Ruff config — Python linting + formatting for services/* and tools/*
+target-version = "py311"
+line-length = 100
+
+[lint]
+select = [
+  "E", "F", "W",   # pycodestyle + pyflakes
+  "I",             # isort
+  "N",             # pep8-naming
+  "UP",            # pyupgrade
+  "B",             # bugbear
+  "C4",            # comprehensions
+  "SIM",           # simplify
+  "RET",           # returns
+]
+ignore = [
+  "E501",          # handled by line-length above
+  "B008",          # FastAPI Depends pattern
+]
+
+[format]
+quote-style = "double"
+indent-style = "space"
