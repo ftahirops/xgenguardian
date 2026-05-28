@@ -7,6 +7,7 @@ All project documentation, plans, tracking, and runbooks live here. This directo
 ```
 docs/
 ├── README.md               ← you are here
+├── blueprint-architecture.md ← GitHub-facing system blueprint and differentiation
 ├── architecture.md         ← full architecture, threat model, features, plan
 ├── phases/                 ← phase plans (1 file per phase)
 │   ├── phase-0-foundations.md
@@ -39,6 +40,7 @@ docs/
 
 ## Quick Links
 
+- [Blueprint Architecture](blueprint-architecture.md)
 - [Architecture (full document)](architecture.md)
 - [Master Task List](tasks/TASKS.md)
 - [Active Bugs](bugs/BUGS.md)
