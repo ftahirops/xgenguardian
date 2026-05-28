@@ -323,8 +323,14 @@ var registry = []Entry{
 			"claude.ai", "www.claude.ai",
 			"console.anthropic.com", "docs.anthropic.com",
 			"api.anthropic.com", "support.anthropic.com",
+			// Anthropic also publishes docs/dashboard under claude.com — the
+			// docs.anthropic.com redirect chain lands on docs.claude.com /
+			// platform.claude.com. Add the whole claude.com suffix.
+			"claude.com", "www.claude.com",
+			"docs.claude.com", "platform.claude.com",
+			"console.claude.com", "code.claude.com",
 		},
-		Suffixes: []string{".anthropic.com", ".claude.ai"},
+		Suffixes: []string{".anthropic.com", ".claude.ai", ".claude.com"},
 	},
 	{
 		Brand: "openai",

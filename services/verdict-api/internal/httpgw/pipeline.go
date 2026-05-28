@@ -133,9 +133,14 @@ func (s *Server) runPipelineWithTier(ctx context.Context, req checkRequest, tier
 	// --- Async corroborators (run in parallel with Tier-2) ---
 	// RDAP populates DomainAge for the universal phishing rule's third clause.
 	// Web Risk + feed_entries populate fusion.Inputs.GSBClean / BlocklistHit.
+	//
+	// feedHit holds the tiered result. Mutated by exactly one goroutine
+	// (the feed-lookup one); the WaitGroup join below provides the
+	// happens-before for subsequent reads.
 	var (
 		corroboratorsWG sync.WaitGroup
 		feedSources     []string
+		feedHit         FeedHit
 	)
 	corroboratorsWG.Add(3)
 	go func() {
@@ -166,10 +171,14 @@ func (s *Server) runPipelineWithTier(ctx context.Context, req checkRequest, tier
 		defer corroboratorsWG.Done()
 		fctx, c := context.WithTimeout(ctx, 2*time.Second)
 		defer c()
-		hit, sources, _ := queryFeedHit(fctx, s.Pg, req.URL, domain)
-		if hit {
+		hit, _ := queryFeedHit(fctx, s.Pg, req.URL, domain)
+		feedHit = hit
+		// BlocklistHit on Inputs stays as a "any hit" flag for the legacy
+		// fusion path. The new staged-policy decision below consults
+		// feedHit's tier breakdown directly.
+		if hit.Hit() {
 			in.BlocklistHit = true
-			feedSources = sources
+			feedSources = hit.Sources
 		}
 	}()
 
@@ -331,7 +340,7 @@ func (s *Server) runPipelineWithTier(ctx context.Context, req checkRequest, tier
 		finalVerdict, codes, blockReason, strictnessApplied, confidence, pageClass, grade =
 			legacyDecision(req, in, out, render, feedSources, oauthDec)
 	} else {
-		policyIn := buildPolicyInputs(req, in, out, render, feedSources, oauthDec)
+		policyIn := buildPolicyInputs(req, in, out, render, feedSources, feedHit, oauthDec)
 		policyOut := policy.Apply(policyIn)
 		finalVerdict = string(policyOut.Verdict)
 		codes = policyOut.ReasonCodes

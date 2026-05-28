@@ -255,16 +255,47 @@ func isSharedHosting(domain string) bool {
 	return false
 }
 
+// FeedHit captures the source-tiered result of a feed_entries lookup.
+// Callers consume both the sources and the confidence to decide whether
+// to auto-BLOCK (high) or escalate to deep scan (medium/low).
+type FeedHit struct {
+	// Sources — distinct feed sources that matched (URLhaus, OpenPhish, ...).
+	Sources []string
+	// HighSources — subset of Sources whose confidence='high'. A single hit
+	// here is sufficient to BLOCK. URLhaus, OpenPhish, Web Risk, and
+	// manually-curated IOC sets all count as high.
+	HighSources []string
+	// MediumSources — subset whose confidence='medium'. Single hit alone
+	// is advisory (force Tier-2, optional WARN); two or more across distinct
+	// sources is BLOCK by consensus.
+	MediumSources []string
+	// LowSources — subset whose confidence='low'. Informational only,
+	// never blocks on its own.
+	LowSources []string
+}
+
+// Hit reports whether at least one source matched.
+func (h FeedHit) Hit() bool { return len(h.Sources) > 0 }
+
+// ShouldBlock encodes the consensus rule:
+//
+//	high-confidence hit         -> block
+//	2+ medium hits (distinct)   -> block
+//	otherwise                   -> advisory (caller may WARN + force Tier-2)
+func (h FeedHit) ShouldBlock() bool {
+	return len(h.HighSources) > 0 || len(h.MediumSources) >= 2
+}
+
 // queryFeedHit asks Postgres whether the URL — and, for non-shared-hosting
 // domains, the domain itself — has an entry in feed_entries within the last
-// 14 days. Used to populate fusion.Inputs.BlocklistHit.
+// 14 days. Returns a tiered result so the policy can apply consensus rules.
 //
 // Shared-hosting domains (github.com, vercel.app, discordapp.com etc.) are
 // matched on exact URL only: many of these legitimately appear in URLhaus
 // because *some* tenant hosted malware, but the platform itself is fine.
-func queryFeedHit(ctx context.Context, pg *pgxpool.Pool, rawurl, domain string) (bool, []string, error) {
+func queryFeedHit(ctx context.Context, pg *pgxpool.Pool, rawurl, domain string) (FeedHit, error) {
 	if pg == nil {
-		return false, nil, nil
+		return FeedHit{}, nil
 	}
 	var rows pgx.Rows
 	var err error
@@ -276,33 +307,42 @@ func queryFeedHit(ctx context.Context, pg *pgxpool.Pool, rawurl, domain string) 
 	// (url OR domain) match below.
 	if isSharedHosting(domain) || trustreg.IsTrusted(domain) {
 		rows, err = pg.Query(ctx, `
-			SELECT source FROM feed_entries
+			SELECT DISTINCT source, confidence FROM feed_entries
 			WHERE url = $1
 			  AND last_seen > NOW() - INTERVAL '14 days'
-			LIMIT 4
+			LIMIT 8
 		`, rawurl)
 	} else {
 		rows, err = pg.Query(ctx, `
-			SELECT source FROM feed_entries
+			SELECT DISTINCT source, confidence FROM feed_entries
 			WHERE (url = $1 OR domain = $2)
 			  AND last_seen > NOW() - INTERVAL '14 days'
-			LIMIT 4
+			LIMIT 8
 		`, rawurl, domain)
 	}
 	if err != nil {
 		log.Warn().Err(err).Msg("feed_entries query")
-		return false, nil, err
+		return FeedHit{}, err
 	}
 	defer rows.Close()
 
-	sources := []string{}
+	out := FeedHit{}
 	for rows.Next() {
-		var s string
-		if err := rows.Scan(&s); err == nil {
-			sources = append(sources, s)
+		var src, conf string
+		if err := rows.Scan(&src, &conf); err != nil {
+			continue
+		}
+		out.Sources = append(out.Sources, src)
+		switch conf {
+		case "high":
+			out.HighSources = append(out.HighSources, src)
+		case "low":
+			out.LowSources = append(out.LowSources, src)
+		default: // medium or unrecognized -> treat as medium
+			out.MediumSources = append(out.MediumSources, src)
 		}
 	}
-	return len(sources) > 0, sources, nil
+	return out, nil
 }
 
 // chooseGrade derives a single trust grade from the fusion verdict +

@@ -26,19 +26,57 @@ func base(in Inputs) Inputs {
 	return in
 }
 
-// --- Stage F: feed-hit short-circuit ---
+// --- Stage F: feed-hit with source-tier consensus ---
 
-func TestFeedHit_ShortCircuits(t *testing.T) {
+func TestFeedHit_HighConfidenceSingleHit_Blocks(t *testing.T) {
+	// One URLhaus hit alone is enough — URLhaus is curated/high-confidence.
 	r := Apply(base(Inputs{
-		Context: ContextOutput{FeedHit: true, FeedSources: []string{"urlhaus", "phishdb_github"}},
-		// Even with everything else looking clean and identity bound, feed hit wins.
+		Context: ContextOutput{
+			FeedHit:         true,
+			FeedSources:     []string{"urlhaus"},
+			FeedHighSources: []string{"urlhaus"},
+		},
 		Identity: IdentityOutput{Bound: true},
 	}))
 	if r.Verdict != Block {
-		t.Errorf("feed hit should BLOCK; got %s", r.Verdict)
+		t.Errorf("single high-confidence hit should BLOCK; got %s", r.Verdict)
 	}
 	if !has(r.ReasonCodes, reasons.ExternalFeedHit) {
 		t.Errorf("expected ExternalFeedHit; got %v", r.ReasonCodes)
+	}
+}
+
+func TestFeedHit_TwoMediumSources_BlocksByConsensus(t *testing.T) {
+	r := Apply(base(Inputs{
+		Context: ContextOutput{
+			FeedHit:           true,
+			FeedSources:       []string{"phishdb_github", "crowdsec_community"},
+			FeedMediumSources: []string{"phishdb_github", "crowdsec_community"},
+		},
+		Identity: IdentityOutput{Bound: true},
+	}))
+	if r.Verdict != Block {
+		t.Errorf("two medium sources should BLOCK by consensus; got %s", r.Verdict)
+	}
+}
+
+func TestFeedHit_SingleMediumOnly_AdvisoryWarn(t *testing.T) {
+	// PhishDB-GitHub alone is noisy (it once flagged amazon.com). Single hit
+	// must NOT auto-BLOCK; instead it becomes advisory WARN, leaving room
+	// for downstream rules to override either direction.
+	r := Apply(base(Inputs{
+		Context: ContextOutput{
+			FeedHit:           true,
+			FeedSources:       []string{"phishdb_github"},
+			FeedMediumSources: []string{"phishdb_github"},
+		},
+		Identity: IdentityOutput{Bound: true},
+	}))
+	if r.Verdict == Block {
+		t.Errorf("single medium hit should NOT auto-BLOCK; got %s", r.Verdict)
+	}
+	if r.Verdict != Warn {
+		t.Errorf("single medium hit should be WARN advisory; got %s", r.Verdict)
 	}
 }
 

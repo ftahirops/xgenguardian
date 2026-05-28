@@ -95,8 +95,15 @@ type SinkOutput struct {
 // final mapping; never produces a verdict by itself except for the
 // hard-feed-hit short-circuit.
 type ContextOutput struct {
-	FeedHit             bool     // URL or domain on threat feeds
+	FeedHit             bool     // URL or domain on threat feeds (any tier)
 	FeedSources         []string // "urlhaus" | "phishdb_github" | "openphish" | ...
+	// Source-tier breakdown for the consensus rule:
+	//   - FeedHighSources non-empty       → single-source BLOCK justified
+	//   - len(FeedMediumSources) >= 2     → multi-source consensus BLOCK
+	//   - single medium hit only          → WARN + force Tier-2 (advisory)
+	FeedHighSources     []string
+	FeedMediumSources   []string
+	FeedLowSources      []string
 	PathDrift           bool     // previously-trusted domain, new sensitive path
 	IsChallengePage     bool     // bot-protection wall (Cloudflare/Turnstile/etc.)
 	ChallengeKind       string
@@ -198,18 +205,52 @@ func Apply(in Inputs) Result {
 		StageOutcome: map[string]string{},
 	}
 
-	// --- Stage F.1: threat-feed short-circuit (cheapest, highest confidence) ---
-	if in.Context.FeedHit {
+	// --- Stage F.1: threat-feed lookup with source-tier consensus ---
+	//
+	// Rule (matches the agreed architecture):
+	//   - 1+ HIGH-confidence source hit          -> BLOCK (URLhaus/OpenPhish/Web Risk/curated)
+	//   - 2+ distinct MEDIUM source hits         -> BLOCK by consensus
+	//   - 1 MEDIUM source hit only               -> advisory: WARN + leave space
+	//                                               for downstream rules to upgrade.
+	//                                               Don't auto-BLOCK off noisy feeds.
+	//   - LOW only                               -> informational; do nothing here.
+	//
+	// This replaces the previous "any FeedHit = BLOCK" rule which auto-blocked
+	// off PhishDB-GitHub entries that had real false positives
+	// (https://www.Amazon.com was the canonical case).
+	switch {
+	case len(in.Context.FeedHighSources) > 0:
 		r.Verdict = Block
 		r.Confidence = 1.0
-		r.BlockReason = "URL or domain is on threat-intelligence feeds (" +
-			joinUpTo(in.Context.FeedSources, 3) + ")."
+		r.BlockReason = "URL or domain is on a high-confidence threat-intel feed (" +
+			joinUpTo(in.Context.FeedHighSources, 3) + ")."
 		r.ReasonCodes = append(r.ReasonCodes, string(reasons.ExternalFeedHit))
 		if in.Context.OAuthHighRiskUnknown {
 			r.ReasonCodes = append(r.ReasonCodes, string(reasons.OAuthUnverifiedHighScopeApp))
 		}
-		r.StageOutcome["F"] = "fail-feed"
+		r.StageOutcome["F"] = "fail-feed-high"
 		return r
+	case len(in.Context.FeedMediumSources) >= 2:
+		r.Verdict = Block
+		r.Confidence = 0.9
+		r.BlockReason = "URL flagged by multiple independent community feeds (" +
+			joinUpTo(in.Context.FeedMediumSources, 3) + ")."
+		r.ReasonCodes = append(r.ReasonCodes, string(reasons.ExternalFeedHit))
+		r.StageOutcome["F"] = "fail-feed-consensus"
+		return r
+	case len(in.Context.FeedMediumSources) == 1:
+		// Advisory only. Set verdict to Warn as a default; deeper rules
+		// (visual replica, sink failure, etc.) can still upgrade to BLOCK
+		// or downgrade to ALLOW. The reason code surfaces so the report
+		// page shows analysts WHY this URL got extra scrutiny.
+		r.Verdict = Warn
+		r.Confidence = 0.55
+		r.BlockReason = "URL flagged by one community feed (" +
+			in.Context.FeedMediumSources[0] + "). Treating as advisory."
+		r.ReasonCodes = append(r.ReasonCodes, string(reasons.ExternalFeedHit))
+		r.StageOutcome["F"] = "advisory-feed-single-medium"
+		// Fall through — don't `return r` — so subsequent stages can
+		// override either direction.
 	}
 
 	// --- Stage F.2: OAuth-app reputation (Spec §7 hard rule) ---

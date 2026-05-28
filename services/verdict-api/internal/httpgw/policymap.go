@@ -43,6 +43,7 @@ func buildPolicyInputs(
 	out fusion.Output,
 	render *renderResponse,
 	feedSources []string,
+	feedHit FeedHit, // tiered feed lookup result
 	oauthDec *oauthreg.Decision,
 ) policy.Inputs {
 	// Stage A: page class.
@@ -188,6 +189,11 @@ func buildPolicyInputs(
 	if in.BlocklistHit {
 		ctx.FeedHit = true
 		ctx.FeedSources = feedSources
+		// Tier breakdown: lets the decision matrix apply the consensus
+		// rule (single-high = block, ≥2 medium = block, single-medium = WARN/Tier-2).
+		ctx.FeedHighSources = feedHit.HighSources
+		ctx.FeedMediumSources = feedHit.MediumSources
+		ctx.FeedLowSources = feedHit.LowSources
 	}
 	if render != nil {
 		ctx.IsChallengePage = render.IsChallengePage
