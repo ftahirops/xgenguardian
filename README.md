@@ -1,188 +1,300 @@
 # XGenGuardian
 
-**Action-aware web protection for DNS, browsers, copied commands, OAuth consent, downloads, and child/paranoid policy modes.**
+**Action-aware web protection beyond DNS filtering.**
 
-XGenGuardian is not another DNS blocklist wrapper. It is a web trust engine that asks a stronger question before a user takes a risky action:
+XGenGuardian is a self-hostable security system that protects users before risky web actions happen: login, payment, OAuth consent, command copy, file download, popup navigation, and raw-IP browsing. It combines protective DNS, a browser extension, local threat intelligence, sandbox rendering, visual brand matching, credential-sink analysis, command-copy protection, OAuth checks, scam behavior detection, and transparent evidence pages.
 
-> Is this page authorized to ask this user for this action, and where will the action actually go?
+Traditional filters ask:
 
-Most products classify a domain or URL as safe or unsafe. XGenGuardian classifies the **action**: reading a page, entering a password, approving OAuth scopes, copying a terminal command, downloading a file, opening a popup, or visiting unknown content under child/strict/paranoid mode.
+```text
+Is this domain known bad?
+```
 
-For the full technical blueprint, see [`docs/blueprint-architecture.md`](docs/blueprint-architecture.md).
+XGenGuardian asks:
 
-## Eye-Catching Feature Summary
+```text
+Is this page allowed to ask this user for this action?
+```
 
-| Feature | Why It Matters |
+That difference is the product.
+
+## Index
+
+1. [What Makes It Different](#what-makes-it-different)
+2. [Current Release Highlights](#current-release-highlights)
+3. [Step-By-Step Protection Flow](#step-by-step-protection-flow)
+4. [Where It Outperforms Traditional Filters](#where-it-outperforms-traditional-filters)
+5. [Architecture](#architecture)
+6. [Advanced Catch Examples](#advanced-catch-examples)
+7. [Verdict Types](#verdict-types)
+8. [Maturity And Testing](#maturity-and-testing)
+9. [xhelix Integration](#xhelix-integration)
+10. [Quick Start](#quick-start)
+11. [Docs](#docs)
+
+## What Makes It Different
+
+| Layer | What Most Products See | What XGenGuardian Adds |
+|---|---|---|
+| DNS | domain reputation | resolver policy, rebind defense, local feeds, DNS evidence |
+| Browser | URL reputation | full URL, opener lineage, copy events, popup/new-tab context |
+| Page | limited or none | rendered DOM, forms, scripts, downloads, screenshots, behavior |
+| Identity | domain allow/block | claimed brand vs authorized infrastructure |
+| Sensitive action | mostly invisible | login sink, OAuth scopes, copied command, payment/download target |
+| Evidence | opaque category | reason codes, screenshots, checklist, report page |
+| Privacy | third-party SaaS by default | self-hostable, local registries, configurable retention |
+
+**Core rule:**
+
+```text
+Reputation can clear normal browsing.
+Only proof can clear sensitive action.
+```
+
+## Current Release Highlights
+
+The current stabilization line has focused on real-user reliability, false-positive control, and evidence clarity.
+
+| Area | Current Behavior |
 |---|---|
-| Action-aware verdicts | A site can be safe to read but unsafe to log into, copy from, authorize, or download from. |
-| Protective DNS + browser extension | DNS blocks fast at domain level; the browser sees URL path, DOM, forms, clipboard, popups, and downloads. |
-| Copy-command defense | Catches fake developer documentation, ClickFix, `curl-to-shell`, PowerShell `iex`, encoded payloads, and visible-vs-clipboard command swaps. |
-| Identity/sink binding | Blocks pages that look like a brand but send credentials, OAuth, forms, or scripts to untrusted infrastructure. |
-| Sandbox render + visual match | Uses rendered DOM, screenshots, OCR, YARA, forms, downloads, and behavior instead of relying only on reputation. |
-| OAuth and install registries | Positive trust for official apps, official docs, known command templates, and known publisher patterns. |
-| Transparent evidence | Verdicts include reason codes, screenshots, signals, and report pages instead of opaque "blocked by policy" messages. |
-| Child, strict, paranoid modes | Unknown sensitive actions can warn, isolate, block, detonate, or require approval depending on policy. |
-| Self-hostable security stack | Operators can run the system without handing all DNS and browsing metadata to a third-party SaaS resolver. |
-| xhelix bridge-ready | XGenGuardian stops risky web actions; xhelix can consume provenance if the action reaches host execution. |
+| Extension reliability | holding page has a hard watchdog; no indefinite spinner by design |
+| Failure handling | if verification stalls, user gets clear choices instead of being trapped |
+| DNS failure UX | DNS/network failures show a friendly "not an XGG block" explainer |
+| Permanent allowlist | Options page supports trusted hostnames, suffixes, IPs, and CIDRs |
+| 24h trust | user can temporarily trust a site and revoke it later |
+| Raw IP handling | public raw-IP URLs are aggressively scanned/blocked unless operator-trusted |
+| OAuth and email wrappers | known auth hosts and enterprise link wrappers are handled without loops |
+| Evidence pages | warn/block/isolate pages show detailed analysis and hide broken images cleanly |
+| Testing | `make maturity-test` runs release-gate checks across backend, extension, corpus, and status |
 
-## What This System Is
+Passing `make maturity-test` means the current known release gate is green. It does **not** mean the internet is solved; every real false positive/false negative still becomes a permanent regression test.
 
-XGenGuardian is a layered security platform with five main enforcement surfaces:
+## Step-By-Step Protection Flow
 
-1. **Protective DNS resolver** for fast domain-level policy, blocklists, never-block lists, RPZ-style enforcement, rebind defense, and device/network coverage.
-2. **Verdict API** for URL checks, staged scoring, reason codes, registries, feed lookups, policy modes, and evidence persistence.
-3. **Browser extension** for navigation checks, warning/block pages, copy-command mediation, popup lineage, and browser-context enforcement.
-4. **Sandbox render and visual analysis** for dynamic pages, screenshots, DOM, forms, downloads, OCR, YARA, and phishing-kit behavior.
-5. **Transparency portal** for manual scans, reports, admin views, live events, and explainable evidence.
+### 1. Normalize
 
-It is built for attacks that reputation-first products often miss:
-
-- newly created phishing pages,
-- compromised legitimate sites,
-- fake developer documentation,
-- JavaScript-swapped clipboard commands,
-- OAuth consent abuse on real provider domains,
-- image/QR-based lures,
-- first-seen login/payment pages,
-- child-safety decisions where "unknown" should not mean "allowed",
-- high-risk downloads that should be detonated before release.
-
-## System Architecture
+XGenGuardian first normalizes the request:
 
 ```text
-                            User / Device
-                    navigation, DNS, copy, OAuth,
-                    forms, download, popup, scan
-                                  |
-          +-----------------------+-----------------------+
-          |                                               |
-          v                                               v
-+--------------------+                         +--------------------+
-| Protective DNS     |                         | Browser Extension  |
-| - domain policy    |                         | - full URL checks  |
-| - RPZ/blocklists   |                         | - DOM/form context |
-| - rebind defense   |                         | - copy mediation   |
-| - category rules   |                         | - warning UI       |
-+---------+----------+                         +----------+---------+
-          |                                               |
-          +-----------------------+-----------------------+
-                                  |
-                                  v
-                         +--------+---------+
-                         | Verdict API      |
-                         | staged policy    |
-                         +--------+---------+
-                                  |
-       +--------------------------+--------------------------+
-       |                          |                          |
-       v                          v                          v
-+------+-------+          +-------+-------+          +-------+-------+
-| Fast Path    |          | Deep Render   |          | Registries    |
-| cache, feeds,|          | Playwright,   |          | brand, OAuth, |
-| lexical, DNS |          | DOM, YARA, OCR|          | install, trust|
-+------+-------+          +-------+-------+          +-------+-------+
-       |                          |                          |
-       +--------------------------+--------------------------+
-                                  |
-                                  v
-                        +---------+----------+
-                        | Fusion + Mode      |
-                        | Policy Engine      |
-                        +---------+----------+
-                                  |
-            +---------------------+---------------------+
-            |                     |                     |
-            v                     v                     v
-          ALLOW                  WARN                  BLOCK
-                                                        |
-                                      +-----------------+----------------+
-                                      |                                  |
-                                      v                                  v
-                                    ISOLATE                         DETONATE /
-                                                                    REQUIRE_APPROVAL
+raw URL -> decoded URL -> host -> path -> redirects -> final URL -> canonical evidence key
 ```
 
-## Why It Is Not the Same as NextDNS, Quad9, Umbrella, or Browser Safe Browsing
+It handles long URLs, wrappers, punycode, fragments, nested destinations, raw IPs, and browser-internal schemes safely.
 
-DNS products are excellent at fast, broad, low-latency blocking. Browser vendors are excellent at huge-scale reputation. Enterprise secure web gateways are strong at managed fleet policy. XGenGuardian is different because its core model is **proof-first for sensitive actions**.
+### 2. Check Known Bad And Known Safe Signals
+
+Fast checks run first:
+
+- local threat feeds,
+- domain/URL cache,
+- known blocklists,
+- trusted identity registry,
+- user/operator allowlist,
+- external reputation evidence when configured,
+- raw IP and direct-download shape.
+
+High-confidence bad can block immediately. Clean reputation lowers risk, but it does not bypass sensitive-action checks.
+
+### 3. Classify The Page Action
+
+The engine decides what kind of page this is:
+
+| Page Class | Why It Matters |
+|---|---|
+| login | credentials require trusted identity and trusted sink |
+| payment/billing | payment processor trust must be action-scoped |
+| OAuth | client ID, scopes, redirect URI, publisher matter |
+| developer install/docs | copied commands can be the payload |
+| download | file type, source, hash, and sandbox behavior matter |
+| support/refund/tax | phone, remote-tool, gift-card, crypto phrases matter |
+| generic browsing | lower friction, reputation often enough |
+
+### 4. Run Tier-1 Fast Checks
+
+These are low-latency checks:
+
+- homoglyph and typosquat detection,
+- DGA/random hostname detection,
+- suspicious domain keywords,
+- certificate age,
+- raw-IP shape,
+- shared-hosting tenant handling.
+
+### 5. Decide Whether To Deep Scan
+
+Deep scan is forced for high-risk cases:
+
+- login, payment, OAuth, MFA, recovery,
+- unknown billing/checkout pages,
+- developer install pages,
+- public raw-IP URLs,
+- unknown downloads,
+- brand name in URL,
+- shared-hosting tenants,
+- suspicious opener/popup lineage,
+- strict, child, paranoid, or ultra mode.
+
+### 6. Sandbox Render
+
+The sandbox opens the page in Chromium and extracts:
+
+- screenshot,
+- DOM,
+- forms and credential sinks,
+- downloads,
+- scripts,
+- YARA matches,
+- popup/alert/fullscreen behavior,
+- hidden fields,
+- code blocks,
+- shell commands,
+- final URL and redirects.
+
+### 7. Visual And Identity Binding
+
+Visual match asks:
 
 ```text
-Typical DNS/security product:
-  domain or URL -> reputation/category lookup -> allow/block
-
-XGenGuardian:
-  page -> claimed identity -> requested action -> sink/target -> policy mode -> verdict + evidence
+What brand does this page look like?
 ```
 
-| Capability | DNS-only products | Browser built-ins | Enterprise SWG | XGenGuardian |
-|---|---:|---:|---:|---:|
-| Domain reputation | Strong | Strong | Strong | Strong via feeds/resolver |
-| URL/path context | Weak | Medium | Strong | Strong |
-| DOM/form analysis | None | Limited | Medium | Strong |
-| Rendered screenshot/OCR evidence | None | Limited | Mixed | Core design |
-| Copy-command mediation | None | None | Rare | Core feature |
-| Visible text vs clipboard mismatch | None | None | Rare | Core feature |
-| OAuth consent risk analysis | None | Weak | Mixed | Core feature |
-| Developer install-lure detection | None | Weak | Rare | First-class page class |
-| Per-action policy | Category-based | Mostly reputation | Mixed | Core model |
-| Child/paranoid handling for unknown sensitive actions | Category-based | Limited | Mixed | First-class modes |
-| Transparent evidence bundle | Weak | Weak | Mixed | Core design |
-| Self-hostable privacy | Mixed | No | Usually no | Yes |
-| Massive global telemetry | Provider advantage | Browser advantage | Vendor advantage | Not the goal |
+Identity binding asks:
 
-XGenGuardian does not try to out-index Google or out-telemetry enterprise security clouds. It shines where those systems are structurally weaker: **fresh sensitive pages, command-copy malware, brand impersonation with untrusted sinks, OAuth consent abuse, strict child/paranoid decisions, and evidence-driven self-hosted protection.**
+```text
+Is this host allowed to represent that brand for this action?
+```
 
-## How Verdicts Work
+Example:
 
-XGenGuardian avoids one flat score. It stages decisions so unrelated signals do not get mixed too early.
+```text
+looks like Microsoft + not Microsoft infrastructure + asks for password = block
+```
 
-| Stage | Question | Example Output |
+### 8. Sink And Action Verification
+
+XGenGuardian checks where the action goes:
+
+| Action | Verified By |
+|---|---|
+| password | form action, fetch/XHR/beacon/WebSocket sink |
+| payment | known payment processor scoped to payment action |
+| OAuth | client ID, scopes, redirect URI, provider |
+| command copy | command structure, official install registry, clipboard mediation |
+| download | file type, hash, YARA, direct-download pattern |
+| support/refund | phone, remote-support tool, gift-card/wire/crypto phrases |
+
+### 9. Final Policy
+
+The staged policy combines evidence into:
+
+```text
+ALLOW / WARN / ISOLATE / BLOCK / REQUIRE_APPROVAL / DETONATE
+```
+
+Policy mode changes the risk tolerance:
+
+| Mode | Intended Use |
+|---|---|
+| Normal | low friction |
+| Safe | default daily browsing |
+| Family | child/content safety |
+| Strict | stronger unknown-site scrutiny |
+| Paranoid | sensitive pages isolate when not proven |
+| Ultra | maximum proof requirement, intentionally noisy |
+
+## Where It Outperforms Traditional Filters
+
+XGenGuardian is strongest when the attack is not yet known to global reputation systems.
+
+| Attack Class | Why DNS/Reputation Misses | XGenGuardian Catch Point |
 |---|---|---|
-| Normalize | What URL is really being requested after redirects, shorteners, encoding, and punycode? | canonical URL graph |
-| Reputation | Is the domain or URL already known? | known bad, known safe, unknown |
-| Page class | What kind of action does this page request? | login, payment, OAuth, developer install, download, chat, adult, generic |
-| Replica | Does the page visually or semantically claim a known brand? | claimed brand + similarity |
-| Identity | Is the host, tenant, cert, ASN, script, form, or OAuth target authorized for that brand? | authorized, mismatch, unknown |
-| Sink | Where will credentials, OAuth, clipboard, downloads, or forms go? | trusted sink, untrusted sink, unknown |
-| Policy mode | What should this user/profile allow under uncertainty? | allow, warn, block, isolate, detonate, require approval |
+| fresh phishing | domain has no history | visual replica + identity mismatch + sink analysis |
+| fake developer docs | no malicious download, just copied text | command-copy mediation + shell IOC scanner |
+| JavaScript clipboard swap | visible text looks safe | copy event and clipboard comparison path |
+| OAuth consent abuse | real provider domain looks clean | unknown client + sensitive scopes + redirect risk |
+| compromised legitimate site | parent domain is reputable | path-level verdict + rendered sink behavior |
+| support scam | may be a new clean domain | phone/remote-tool/popup/brand correlation |
+| raw-IP malware link | DNS never sees it | browser/API raw-IP policy + binary path detection |
+| HTML smuggling | payload assembled after render | sandbox render + YARA + download behavior |
+| popup scareware | reputation may lag | popup storm, alert loop, fullscreen, beforeunload signals |
+| shared-hosting abuse | parent platform is legitimate | tenant-aware checks, not apex-domain blocking |
 
-Core rule:
-
-```text
-high brand similarity + identity mismatch + sensitive action = block
-```
-
-Stronger rule:
+## Architecture
 
 ```text
-sensitive action + untrusted sink = block
+User / Browser / Device
+  DNS lookup, navigation, copy, OAuth, form, download, popup
+          |
+          +-------------------------+
+          |                         |
+          v                         v
+  Protective DNS              Browser Extension
+  fast domain policy          URL, DOM, copy, popup
+          |                         |
+          +-----------+-------------+
+                      |
+                      v
+                Verdict API
+          normalize, classify, policy
+                      |
+        +-------------+-------------+
+        |             |             |
+        v             v             v
+   Fast Checks   Sandbox Render   Registries
+   feeds/DNS     DOM/YARA/OCR     brand/OAuth/install
+        |             |             |
+        +-------------+-------------+
+                      |
+                      v
+             Staged Policy Engine
+                      |
+        ALLOW / WARN / ISOLATE / BLOCK
 ```
 
-## Where XGenGuardian Shines
+## Advanced Catch Examples
 
-| Attack | Why Common Defenses Miss | XGenGuardian Response |
+The detailed casebook is in [`docs/advanced-detection-cases.md`](docs/advanced-detection-cases.md).
+
+| Case | What Makes It Hard | Rule Combination That Catches It |
 |---|---|---|
-| Fake docs with malicious terminal command | No file download, fresh domain, trusted hosting platform | Browser copy guard + command analyzer + install registry |
-| JavaScript command swap | User sees safe text but clipboard receives payload | Visible-vs-clipboard and copy-event mediation |
-| OAuth consent phishing | Real OAuth provider domain may look legitimate | OAuth scope/client/redirect/publisher analysis |
-| New login clone | Domain has no reputation yet | Visual/semantic replica + identity mismatch |
-| Compromised legitimate site | Domain reputation may be clean | Path-level URL verdicts, forms, sinks, DOM behavior |
-| QR/image lure | URL hidden in image or rendered content | OCR/QR recursion through render pipeline |
-| HTML smuggling | Payload assembled inside browser | Sandbox render + YARA + download behavior |
-| Child visits unknown chat/community | Category lists lag or miss niche sites | Child mode treats unknown sensitive categories as approval/block |
+| fake Claude/OpenAI docs with malicious command | page looks like docs, no file download | developer-install page class + command scanner + official install registry |
+| Microsoft support scam with phone in screenshot | phone may not be in DOM | OCR/visual brand + unknown support phone + scareware language |
+| SafeLinks wrapped phishing URL | wrapper domain is Microsoft | unwrap destination + scan final URL + OAuth/page-class policy |
+| public IP malware path | DNS reputation sees nothing | raw-IP host + binary/architecture path + direct download logic |
+| compromised WordPress page | root domain may be clean | path-level reputation + form sink + behavior |
+| OAuth app on real Google/Microsoft page | provider domain is legitimate | unknown client + sensitive scopes + redirect URI analysis |
+| checkout false positive | payment sink is cross-origin by design | action-scoped payment processor trust |
+| shared-hosting phishing tenant | platform domain is legitimate | tenant-level policy, never apex-level punishment |
+| popup storm scareware | page may not steal credentials | popup/alert/fullscreen/beforeunload behavior composite |
+| image-only QR phishing | URL hidden from DOM | screenshot OCR/QR extraction + recursive URL scan |
 
-## Security Posture
+## Verdict Types
 
-XGenGuardian is designed as a high-security, evidence-first system:
+| Verdict | Meaning |
+|---|---|
+| ALLOW | enough evidence to proceed |
+| WARN | suspicious, but not confirmed malicious |
+| ISOLATE | risky/unknown; open with extra safety |
+| BLOCK | high-confidence malicious or disallowed |
+| REQUIRE_APPROVAL | parent/admin/operator approval needed |
+| DETONATE | file/script requires sandbox analysis first |
+| ALLOW_TEMP | temporary user approval with expiry |
 
-- **Self-hostable by default** so operators can keep DNS, URL, and evidence data under their own control.
-- **Layered enforcement** so DNS, browser, API, sandbox, registries, and portal each cover different blind spots.
-- **Reason-coded verdicts** so every decision can be audited, tuned, and appealed.
-- **Policy modes** so uncertainty is handled differently for normal users, children, executives, developers, and paranoid profiles.
-- **Positive trust registries** so official install commands and known vendors can be allowed without weakening detection for clones.
-- **Sandboxed dynamic analysis** so JavaScript-mutated pages, downloads, YARA hits, and behavior are captured after render.
+## Maturity And Testing
 
-No security product is "perfect" against every attack. XGenGuardian's security advantage is narrower and more defensible: it raises the bar for risky web actions that happen before endpoint tools usually get a chance to respond.
+The system has a dedicated maturity strategy:
+
+- [`docs/maturity-testing-blueprint.md`](docs/maturity-testing-blueprint.md) defines release gates, chaos tests, FP/FN corpus rules, raw-IP policy, extension no-hang tests, privacy/retention, and accessibility requirements.
+- [`docs/real-user-acceptance-test-plan.md`](docs/real-user-acceptance-test-plan.md) defines practical browser testing for real users.
+- `make maturity-test` runs the release-gate suite.
+
+Current testing stance:
+
+```text
+Automated tests prove known cases still work.
+Real-user acceptance testing proves the product is usable daily.
+Every false result becomes a permanent corpus entry.
+```
 
 ## xhelix Integration
 
@@ -190,14 +302,10 @@ XGenGuardian and xhelix are complementary.
 
 | Layer | XGenGuardian | xhelix |
 |---|---|---|
-| Web page classification | Owns | Consumes selected context |
-| DNS/URL action verdicts | Owns | Consumes selected context |
-| Copy-command prevention | Owns | Consumes provenance if command executes |
-| Download pre-scan | Owns | Observes file/process behavior |
-| Process execution | No | Owns |
-| Secret/API-key reads | No | Owns |
-| Outbound C2 from process | Enriches with domain intel | Owns enforcement |
-| Containment | Browser/DNS/isolation | Host/process/cgroup |
+| web trust | owns URL, DOM, visual, OAuth, command-copy, download pre-check |
+| host enforcement | sends provenance context | owns process, file, secret, cgroup, outbound behavior |
+| prevention point | before risky web action | after execution starts |
+| combined story | prevent web-originated risk | contain host impact if prevention fails |
 
 ```text
 XGenGuardian evidence
@@ -209,15 +317,13 @@ XGenGuardian evidence
   reason_codes
         |
         v
-xhelix host enforcement
+xhelix runtime context
   process lineage
   command executed
-  files/secrets touched
+  secrets touched
   outbound destination
   containment decision
 ```
-
-This proves the combined story: XGenGuardian prevents risky web-originated actions; xhelix contains the host if prevention fails or a user bypasses a warning.
 
 ## Quick Start
 
@@ -237,8 +343,8 @@ make seed-brands
 # 5. Start the Transparency Portal
 make dev-portal
 
-# 6. Send a test DoH query
-make test-doh URL=https://example.com
+# 6. Run the maturity release gate
+make maturity-test
 ```
 
 ## Repo Layout
@@ -247,18 +353,23 @@ make test-doh URL=https://example.com
 code/
 ├── apps/             browser extension, portal, landing page, Windows client
 ├── services/         resolver, verdict API, sandbox render, visual match, scheduler
-├── tools/            brand seeder, blocklist fetcher, bulk scan, eval, fp-bench
-├── docs/             architecture, blueprint, phases, runbooks, tasks, progress
+├── tools/            brand seeder, blocklist fetcher, bulk scan, eval, fp-bench, maturity
+├── docs/             architecture, blueprint, maturity, real-user testing, runbooks
 ├── proto/            shared protobuf definitions
 ├── migrations/       Postgres schema
 ├── infra/            deployment infrastructure
 └── docker-compose.yml
 ```
 
-## Where to Start
+## Docs
 
-- [`docs/blueprint-architecture.md`](docs/blueprint-architecture.md) - public-facing system blueprint and differentiation.
-- [`docs/architecture.md`](docs/architecture.md) - full architecture, threat model, and implementation plan.
+Start here:
+
+- [`docs/advanced-detection-cases.md`](docs/advanced-detection-cases.md) - advanced phishing, scam, raw-IP, OAuth, and impossible-case detection examples.
+- [`docs/blueprint-architecture.md`](docs/blueprint-architecture.md) - system architecture and differentiation.
+- [`docs/maturity-testing-blueprint.md`](docs/maturity-testing-blueprint.md) - exhaustive release-gate and stability test plan.
+- [`docs/real-user-acceptance-test-plan.md`](docs/real-user-acceptance-test-plan.md) - real browser testing strategy.
+- [`docs/architecture.md`](docs/architecture.md) - full technical architecture and threat model.
 - [`docs/SIMPLE-SETUP.md`](docs/SIMPLE-SETUP.md) - simplest operator setup.
 - [`docs/USAGE.md`](docs/USAGE.md) - full operator setup.
 - [`docs/tasks/TASKS.md`](docs/tasks/TASKS.md) - active task tracking.

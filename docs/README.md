@@ -7,7 +7,9 @@ All project documentation, plans, tracking, and runbooks live here. This directo
 ```
 docs/
 ├── README.md               ← you are here
+├── advanced-detection-cases.md ← hard phishing, scam, OAuth, raw-IP, and edge-case examples
 ├── blueprint-architecture.md ← GitHub-facing system blueprint and differentiation
+├── maturity-testing-blueprint.md ← exhaustive testing, chaos, FP/FN, and release gates
 ├── architecture.md         ← full architecture, threat model, features, plan
 ├── phases/                 ← phase plans (1 file per phase)
 │   ├── phase-0-foundations.md
@@ -40,7 +42,10 @@ docs/
 
 ## Quick Links
 
+- [Advanced Detection Cases](advanced-detection-cases.md)
 - [Blueprint Architecture](blueprint-architecture.md)
+- [Maturity Testing Blueprint](maturity-testing-blueprint.md)
+- [Real-User Acceptance Test Plan](real-user-acceptance-test-plan.md)
 - [Architecture (full document)](architecture.md)
 - [Master Task List](tasks/TASKS.md)
 - [Active Bugs](bugs/BUGS.md)
