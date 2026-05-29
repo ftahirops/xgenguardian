@@ -228,6 +228,20 @@ type ContextOutput struct {
 	// "domain is public" to fire PUBLIC_DOMAIN_PRIVATE_IP.
 	BrowserRemoteIPIsPrivate bool
 
+	// Tier2Requested — true when the pipeline decided this URL needed a
+	// sandbox render (Tier-2) for evidence. Goes hand-in-hand with
+	// Tier2Available below: if Tier2Requested && !Tier2Available, the
+	// engine WANTED page-content evidence but didn't get it (sandbox
+	// down, sandbox timeout, render-cache miss + service unhealthy).
+	//
+	// This pair drives the health-gated degraded-mode behavior in
+	// policy.Apply: sensitive pages on which Tier-2 was needed but
+	// missing must NOT silently ALLOW — they ISOLATE with a
+	// TIER2_DATA_UNAVAILABLE reason code. Closes the "uflix.to-class"
+	// silent-fake-safety bug.
+	Tier2Requested bool
+	Tier2Available bool
+
 	// ResolverDivergence — Phase E soft signal. True when the browser's
 	// connection IP for this domain is publicly routable but is NOT in
 	// the answer set our protective resolver saw at lookup time. Multi-
@@ -1141,6 +1155,40 @@ func Apply(in Inputs) Result {
 		r.ReasonCodes = append(r.ReasonCodes, in.Context.YaraReasonCodes...)
 		r.StageOutcome["F"] = "yara"
 		// Do not return; let later rules upgrade to BLOCK if they fire.
+	}
+
+	// --- Health-gated degraded mode (DT companion §23.1) ---
+	//
+	// Tier-2 was requested but the sandbox didn't return evidence. Treat
+	// missing evidence as MISSING PROOF, not as PASS. On sensitive pages
+	// the engine must NOT silently ALLOW: ISOLATE so the user makes the
+	// call. On non-sensitive pages we still surface the gap in the trace
+	// so the operator can see why downstream F.4 rules didn't fire.
+	//
+	// This is the structural fix for the silent-fake-safety bug class
+	// uflix.to surfaced: the engine returned ALLOW because no F.4 rule
+	// had data to fire on, even though page-content was supposed to be
+	// the primary signal source.
+	//
+	// Hard rules (CI / Stage 0 / fresh-domain / raw-IP / vendor-DNS
+	// consensus) already short-circuited above and DO NOT depend on
+	// sandbox — those still work without Tier-2.
+	if in.Context.Tier2Requested && !in.Context.Tier2Available {
+		r.ReasonCodes = append(r.ReasonCodes, string(reasons.Tier2DataUnavailable))
+		if in.PageClass.IsSensitive() && !in.IsHighlyTrusted() {
+			r.Verdict = Isolate
+			r.Confidence = 0.6
+			r.BlockReason = "Sensitive page (login/payment/OAuth/install) could not be deep-scanned. Opening in isolation as a safety default."
+			r.StageOutcome["H"] = "isolate-tier2-missing-on-sensitive"
+			r.trace("H", string(reasons.Tier2DataUnavailable), "fail",
+				"sandbox unavailable on sensitive page → ISOLATE (missing proof, not clean)", 0)
+		} else {
+			r.StageOutcome["H"] = "tier2-missing-noted"
+			r.trace("H", string(reasons.Tier2DataUnavailable), "suppressed",
+				"sandbox unavailable; downstream F.4 rules will not fire on this URL", 0)
+		}
+	} else if in.Context.Tier2Requested {
+		r.trace("H", "", "pass", "tier-2 sandbox evidence present", 0)
 	}
 
 	// --- Stage F.4: deep DOM evidence (Phase 6) ---

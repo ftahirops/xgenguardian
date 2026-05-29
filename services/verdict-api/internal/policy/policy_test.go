@@ -908,3 +908,94 @@ func TestPhaseE_TwoSoftSignals_HigherConfidenceThanOne(t *testing.T) {
 		t.Errorf("two corroborating soft signals should report higher confidence than one (one=%.2f, two=%.2f)", one.Confidence, two.Confidence)
 	}
 }
+
+// ============================================================================
+// Health-gated degraded modes — TIER2_DATA_UNAVAILABLE
+//
+// The "uflix.to-class" bug: pipeline asked for Tier-2 sandbox evidence but the
+// sandbox was down. Without these tests the engine silently ALLOWs because
+// none of the F.4 rules have data to fire on. Real fix: ISOLATE on sensitive
+// pages, surface TIER2_DATA_UNAVAILABLE on the trace either way.
+// ============================================================================
+
+func TestHealthGate_Tier2RequestedButMissing_OnSensitive_Isolates(t *testing.T) {
+	r := Apply(base(Inputs{
+		PageClass: pageclass.Login,
+		Context: ContextOutput{
+			Tier2Requested: true,
+			Tier2Available: false,
+		},
+	}))
+	if r.Verdict != Isolate {
+		t.Errorf("sensitive page + Tier2 missing should ISOLATE; got %s", r.Verdict)
+	}
+	if !has(r.ReasonCodes, reasons.Tier2DataUnavailable) {
+		t.Errorf("expected TIER2_DATA_UNAVAILABLE in reasons; got %v", r.ReasonCodes)
+	}
+}
+
+func TestHealthGate_Tier2RequestedButMissing_OnGeneric_AllowsWithCode(t *testing.T) {
+	r := Apply(base(Inputs{
+		PageClass: pageclass.Generic,
+		Context: ContextOutput{
+			Tier2Requested: true,
+			Tier2Available: false,
+		},
+	}))
+	if r.Verdict == Isolate || r.Verdict == Block {
+		t.Errorf("generic page + Tier2 missing should not block/isolate; got %s", r.Verdict)
+	}
+	if !has(r.ReasonCodes, reasons.Tier2DataUnavailable) {
+		t.Errorf("missing Tier-2 must still surface in reason codes on generic pages")
+	}
+}
+
+func TestHealthGate_Tier2Available_NoMissingProof(t *testing.T) {
+	r := Apply(base(Inputs{
+		PageClass: pageclass.Login,
+		Context: ContextOutput{
+			Tier2Requested: true,
+			Tier2Available: true,
+		},
+	}))
+	if has(r.ReasonCodes, reasons.Tier2DataUnavailable) {
+		t.Errorf("Tier-2 available must NOT emit missing-proof code; got %v", r.ReasonCodes)
+	}
+}
+
+func TestHealthGate_TrustedHost_SuppressesIsolate(t *testing.T) {
+	// A curated trusted brand on a sensitive page does NOT isolate just
+	// because the sandbox is down — vendor-DNS + identity + brand-graph
+	// are still strong signals. Only untrusted sensitive pages escalate.
+	r := Apply(base(Inputs{
+		PageClass:       pageclass.Login,
+		TrustedIdentity: true,
+		Context: ContextOutput{
+			Tier2Requested: true,
+			Tier2Available: false,
+		},
+	}))
+	if r.Verdict == Isolate {
+		t.Errorf("trusted host should not escalate on missing Tier-2; got %s", r.Verdict)
+	}
+}
+
+func TestHealthGate_HardRuleStillFires_DespiteMissingTier2(t *testing.T) {
+	// PUBLIC_DOMAIN_PRIVATE_IP must STILL block even when Tier-2 is
+	// missing. Hard rules don't depend on sandbox.
+	r := Apply(base(Inputs{
+		Domain: "google.com",
+		Context: ContextOutput{
+			BrowserRemoteIP:          "10.0.0.5",
+			BrowserRemoteIPIsPrivate: true,
+			Tier2Requested:           true,
+			Tier2Available:           false,
+		},
+	}))
+	if r.Verdict != Block {
+		t.Errorf("hard rule must fire regardless of Tier-2 state; got %s", r.Verdict)
+	}
+	if !has(r.ReasonCodes, reasons.PublicDomainPrivateIP) {
+		t.Errorf("expected PUBLIC_DOMAIN_PRIVATE_IP")
+	}
+}

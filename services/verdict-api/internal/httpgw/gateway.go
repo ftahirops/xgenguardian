@@ -184,6 +184,24 @@ type checkResponse struct {
 	// we decided — the block page renders this as a transparency table
 	// and the livetail tool prints it line-by-line.
 	DecisionTrace []decisionStep `json:"decision_trace,omitempty"`
+
+	// WrapperChain — when the original URL came through an email-gateway
+	// wrapper (Microsoft SafeLinks, Proofpoint URL Defense, Mimecast,
+	// Cisco Secure Email, Barracuda, Symantec, Gmail), each hop the
+	// pipeline unwrapped is listed here in order. The engine analyzes
+	// the FINAL unwrapped target (not the wrapper), but the chain is
+	// surfaced so the warn/block page can show "this came in via
+	// SafeLinks; the real destination is <target>." Empty for ordinary
+	// URLs that didn't need unwrapping.
+	WrapperChain []wrapperHop `json:"wrapper_chain,omitempty"`
+}
+
+// wrapperHop describes one URL-wrapper hop the unwrapper resolved.
+// Stable on the wire so downstream UIs and the livetail tool can
+// render it without versioned conditionals.
+type wrapperHop struct {
+	Wrapper string `json:"wrapper"` // "safelinks" | "proofpoint" | "mimecast" | ...
+	URL     string `json:"url"`     // the wrapper URL we observed
 }
 
 // decisionStep is the wire-format mirror of policy.DecisionStep.

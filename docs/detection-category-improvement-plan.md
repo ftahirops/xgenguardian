@@ -1226,6 +1226,236 @@ crypto address display
 refund overpayment language
 ```
 
+For this category, use the most aggressive verification level. Money movement
+requires stronger proof than ordinary browsing.
+
+### Aggressive Payment Trust Mode
+
+Trigger aggressive payment mode when any page contains:
+
+```text
+crypto wallet address
+wallet connect button
+seed phrase / recovery phrase input
+approve / permit / sign transaction flow
+gift-card / prepaid-card wording
+wire transfer / bank transfer instructions
+refund / overpayment / tax / support fee language
+invoice/payment request
+checkout/payment form
+support page requesting money
+QR code containing payment or wallet payload
+```
+
+Collect a complete payment-risk dossier:
+
+```text
+domain evidence
+TLS/certificate evidence
+DNS/connection identity
+company/legal identity
+merchant/payment identity
+wallet/address identity
+on-chain risk
+review/forum/search footprint
+support/contact identity
+brand affiliation
+page action
+payment method
+user-risk context
+```
+
+### Deep Website And Business Verification
+
+Payment pages should be checked more strictly than read-only pages.
+
+| Layer | Check | Suspicious If |
+|---|---|---|
+| domain age | RDAP/first-seen/CT first-seen | new domain asking for payment/crypto |
+| DNS | authoritative NS, TTL, CNAME, returned-IP ledger | unstable, fast-flux, private IP, unexpected ASN |
+| TLS | valid cert, issuer, SAN, CT history | cert just issued for new payment site, mismatch |
+| company registry | legal entity active, age, address | absent, new, dissolved, mismatched |
+| merchant identity | payment recipient/merchant name | does not match legal/site identity |
+| phone/email | support contact consistency | free email, unverified phone, reused support number |
+| reviews/forums | search/reputation footprint | scam complaints, fake review pattern, no footprint |
+| brand affiliation | official partner/protocol/project proof | unsupported claim, fake badge, copied logo |
+| refund policy | clear terms and legal contact | vague/no refund policy for paid service |
+| payment method | appropriate method | gift-card/wire/crypto for support/refund/tax |
+
+Search/review/forum signals are advisory only, but useful:
+
+```text
+search snippets for domain/company/phone/wallet
+Reddit/forum scam mentions
+Trustpilot/BBB/ScamAdviser-style reviews when available
+app-store/extension-store reviews when relevant
+GitHub/project/community footprint for crypto projects
+social profile age and bidirectional domain link
+complaint databases and prior XGG reports
+```
+
+Governance:
+
+```text
+reviews alone never hard-block
+fake-looking positive reviews do not create trust
+scam complaints + payment action + weak identity raise risk sharply
+no search footprint for a new payment/crypto provider is suspicious, not proof
+```
+
+### Crypto And Wallet Intelligence
+
+For wallet/crypto pages, extract and screen:
+
+```text
+wallet addresses
+contract addresses
+token addresses
+spender addresses
+approval targets
+transaction payloads where observable
+chain/network
+QR payment payloads
+exchange/deposit addresses
+```
+
+External/on-chain sources:
+
+| Source | Use |
+|---|---|
+| Chainabuse API | community and verified scam reports; confidence-scored abuse evidence |
+| Chainalysis Address Screening / Rapid | commercial address risk, exposure, counterparties, continuous monitoring |
+| TRONSCAN security APIs | Tron URL/address/token/transaction risk checks |
+| Etherscan labels/name tags | address labels and public interest tags as advisory evidence |
+| block explorer APIs | contract age, deployer, transaction history, token metadata |
+| sanctions screening APIs | sanctioned wallet/entity screening where licensed |
+| internal XGG wallet graph | repeated wallet across scam pages/campaigns |
+
+Sources:
+
+- Chainabuse API: <https://docs.chainabuse.com/>
+- Chainabuse source/confidence model: <https://docs.chainabuse.com/docs/source-of-information>
+- Chainalysis Address Screening: <https://www.chainalysis.com/product/address-screening/>
+- Chainalysis Rapid triage: <https://www.chainalysis.com/product/rapid/>
+- TRONSCAN security services: <https://docs.tronscan.org/en/api/security-service-api>
+- TRONSCAN scam reporting: <https://support.tronscan.org/hc/en-us/articles/21841611138585-How-to-report-a-scam>
+- Etherscan labels/name tags: <https://info.etherscan.com/public-name-tags-labels>
+
+Crypto hard-risk signals:
+
+```text
+wallet address reported on Chainabuse with high confidence
+wallet/contract flagged by TRONSCAN/security service
+sanctioned wallet/entity hit
+wallet reused across unrelated scam-looking domains
+approval target is known risky spender
+seed phrase requested
+connect wallet on fresh/impersonating domain
+fake airdrop + wallet connect + unknown contract
+QR code decodes to wallet/payment on suspicious page
+```
+
+### Gift Card / Wire / Crypto Payment Rules
+
+Some payment methods are nearly never legitimate in support/refund/security
+contexts.
+
+Hard block in support/refund/security context:
+
+```text
+gift card
+Apple/Google/Steam/Target/Walmart prepaid card
+scratch code / activation code
+wire transfer
+crypto transfer
+Bitcoin/USDT/ETH wallet payment
+bank transfer under urgency
+"security deposit" to protect account
+"refund fee" before refund
+```
+
+Warn/isolate in commerce context:
+
+```text
+crypto-only payment on new merchant
+bank transfer to mismatched recipient
+invoice from unverified company
+payment page with no legal/refund/contact identity
+```
+
+### Wallet-Drainer Detection
+
+Detect dangerous wallet actions:
+
+```text
+connect wallet
+approve unlimited token allowance
+permit / permit2 signatures
+setApprovalForAll
+eth_sign / personal_sign for opaque message
+transaction to new/unverified contract
+request to import seed phrase
+fake airdrop/mint/claim language
+urgency countdown tied to wallet action
+```
+
+Hard block:
+
+```text
+seed phrase request on webpage
+wallet connect + impersonated brand/project
+wallet approve/unlimited allowance to unknown contract
+known drainer script/library/signature pattern
+contract/wallet flagged by on-chain source
+```
+
+False-positive controls:
+
+```text
+official wallet/exchange domains can request wallet actions within verified scope
+DeFi docs discussing approvals are informational unless requesting live action
+testnet/dev pages require clear testnet markers
+open-source dapp with verified domain/repo/contract gets lower risk, not blind trust
+```
+
+### Payment Identity Object
+
+Add a reusable object:
+
+```text
+PaymentEvidence
+  payment_method
+  amount
+  currency
+  recipient_name
+  recipient_account_or_wallet
+  merchant_processor
+  merchant_id_hash
+  legal_entity_match
+  domain_match
+  phone_email_match
+  wallet_chain
+  wallet_reputation
+  refund_policy_url
+  risk_sources[]
+  contradictions[]
+```
+
+Policy question:
+
+```text
+Does the recipient match the identity that earned the user's trust?
+```
+
+Examples:
+
+```text
+verified company + Stripe merchant matching company -> trust contributor
+support site + crypto wallet -> block
+invoice from company A but payment to person B -> high risk
+QR payment to wallet on unknown domain -> isolate/block
+```
+
 ### Features To Add
 
 | Feature | Type | Notes |
@@ -1301,6 +1531,194 @@ observed sink
 domain/infrastructure trust
 visual similarity
 credential/payment/OAuth/download behavior
+```
+
+Zero-day phishing cannot depend on reputation feeds. The page must earn trust
+from live evidence.
+
+Core question:
+
+```text
+Can this exact page, on this exact domain and connection, safely ask the user
+for this exact sensitive action?
+```
+
+If the page asks for a sensitive action and the engine cannot prove identity,
+sink, and infrastructure, it should isolate rather than silently allow.
+
+### Zero-Day Evidence Dossier
+
+Collect:
+
+```text
+claimed brand
+brand evidence source: title, text, logo, favicon, OCR, OpenGraph
+requested action: login, payment, OAuth, download, support, wallet, command
+form fields and form actions
+JS network sinks: fetch/XHR/beacon/WebSocket/postMessage
+redirect chain
+iframe/script/download graph
+domain age and first-seen time
+TLS certificate and CT history
+ASN/CDN/hosting identity
+browser actual IP vs resolver ledger
+external reputation source disagreement
+visual brand match
+favicon/pHash/CLIP matches
+hidden elements and overlays
+anti-analysis behavior
+```
+
+### Action-Proof Gates
+
+| Action | Required Proof | Missing Proof Result |
+|---|---|---|
+| login/password | domain/org identity + safe credential sink + TLS + no hard evidence | ISOLATE |
+| payment/checkout | merchant/company identity + safe payment sink + refund/legal contact | ISOLATE |
+| OAuth consent | provider + client reputation + scope severity + redirect URI relation | WARN/ISOLATE/BLOCK |
+| download/install | official source + file reputation/hash + no raw-IP/fresh-domain lure | WARN/ISOLATE/BLOCK |
+| support call | verified support channel + phone evidence | WARN/ISOLATE |
+| wallet/crypto | wallet/contract risk + verified project/domain | ISOLATE/BLOCK |
+| command copy | official command registry or safe low-risk command | WARN/BLOCK |
+
+### Brand Claim Extraction
+
+Extract claimed identity from:
+
+```text
+page title
+meta/OpenGraph tags
+visible text
+logo/visual match
+favicon hash
+login form placeholder text
+OAuth app name
+support text
+email/wrapper context
+download filename/signature
+```
+
+Brand claim risk:
+
+```text
+brand claim + unrelated domain -> risk
+brand claim + visual match + sensitive action -> high risk
+brand claim + same orggraph relation -> lower risk
+brand claim in news/article context -> informational, not phishing
+```
+
+### Infrastructure Trust For Zero-Day
+
+Reputation feeds may be clean because the site is new. Use infrastructure
+evidence:
+
+```text
+domain registered recently
+certificate first seen recently
+nameservers recently changed
+unexpected ASN/hosting for claimed brand
+browser IP not authorized for domain
+shared hosting tenant with brand claim
+fast redirect chain to sensitive action
+free hosting / free subdomain / newly created SaaS tenant
+```
+
+Rules:
+
+```text
+fresh domain + sensitive action -> isolate unless strong proof exists
+fresh domain + claimed major brand -> high risk
+fresh domain + credential sink to unrelated host -> block
+old domain + new suspicious path/script/sink -> inspect path-level evidence
+```
+
+### Page Graph For Zero-Day
+
+A landing page may look harmless while a child node is malicious.
+
+Build graph:
+
+```text
+landing page
+redirect hops
+forms
+iframes
+scripts
+downloads
+QR targets
+OAuth destinations
+wallet/contract targets
+postMessage targets
+network beacons
+```
+
+Graph rules:
+
+```text
+child node asks for credentials/payment/wallet action -> child gets full scan
+parent inherits worst sensitive child verdict
+same-org edges reduce risk
+unknown third-party sensitive sinks increase risk
+hidden sensitive child nodes increase risk sharply
+```
+
+### Degraded-Mode Policy
+
+Zero-day protection depends on sandbox, visual, and sink extraction. If a
+required detector is down, the verdict must show missing proof.
+
+| Missing Layer | Page Type | Policy |
+|---|---|---|
+| sandbox unavailable | read-only low-risk page | ALLOW/WARN by Tier-1 |
+| sandbox unavailable | login/payment/OAuth/download/support/wallet | ISOLATE |
+| visual-match unavailable | claimed brand + sensitive action | ISOLATE/WARN depending other proof |
+| RDAP unavailable | fresh-domain unknown | do not count as old/trusted |
+| external source timeout | any | source missing, not clean |
+| browser IP missing | sensitive page | connection identity missing; require other proof |
+
+### Search And External Context
+
+For zero-day pages, optional T2/T4 context helps:
+
+```text
+search results for domain/company/phone
+recent web mentions
+social/project profile age
+GitHub/org/project relation
+app-store/package-registry publisher relation
+community scam reports
+CT log burst for similar domains
+similar-domain registration clusters
+```
+
+This evidence is advisory. It improves confidence but does not replace direct
+page/action/sink proof.
+
+### Zero-Day Score Model
+
+High-risk contributors:
+
+| Signal | Weight |
+|---|---:|
+| sensitive action on fresh domain | +0.35 |
+| claimed major brand on unrelated domain | +0.35 |
+| credential/payment sink to unrelated host | +0.60 |
+| visual brand match + identity mismatch | +0.55 |
+| hidden iframe/form/action | +0.30 |
+| unexpected ASN/cert/CDN identity | +0.25 |
+| QR/wrapper/shortener hides sensitive target | +0.25 |
+| anti-analysis / delayed payload | +0.30 |
+| official orggraph/domain/sink proof | -0.40 |
+| old stable domain with no sensitive action | -0.25 |
+
+Hard-block combinations:
+
+```text
+credential sink mismatch + brand claim
+visual brand match + credential action + identity mismatch
+fresh domain + payment/wallet action + bad sink
+OAuth high-risk scopes + unknown client + suspicious redirect
+download executable from raw IP/fresh domain with lure
 ```
 
 ### Features To Add

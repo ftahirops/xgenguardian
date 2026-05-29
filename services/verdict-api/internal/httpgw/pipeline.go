@@ -117,6 +117,27 @@ func (s *Server) runPipeline(ctx context.Context, req checkRequest) checkRespons
 func (s *Server) runPipelineWithTier(ctx context.Context, req checkRequest, tierHint string) checkResponse {
 	pipelineStart := time.Now()
 
+	// Email-gateway unwrap (Wave 1 / DT-2). Run BEFORE domain extraction
+	// and cache lookup so SafeLinks/Proofpoint/Mimecast/Cisco/Barracuda/
+	// Symantec/Gmail wrappers don't poison the verdict cache with one row
+	// per token. The original URL is kept for the response so the user
+	// sees what they clicked, but every downstream pipeline stage runs
+	// against the unwrapped target. Surfaced to the response in
+	// resp.WrapperChain so the warn/block page can explain "this came
+	// through a SafeLinks wrapper that pointed at <target>."
+	var wrapperChain []wrapperHop
+	if unwrap := unwrapEmailGateway(req.URL); unwrap.Found {
+		wrapperChain = append(wrapperChain, wrapperHop{Wrapper: unwrap.Wrapper, URL: req.URL})
+		req.URL = unwrap.URL
+		// One-pass: if the target IS ITSELF a wrapper (rare but seen with
+		// SafeLinks→Proofpoint chains), unwrap once more. Cap at 2 hops
+		// to avoid pathological loops.
+		if unwrap2 := unwrapEmailGateway(req.URL); unwrap2.Found {
+			wrapperChain = append(wrapperChain, wrapperHop{Wrapper: unwrap2.Wrapper, URL: req.URL})
+			req.URL = unwrap2.URL
+		}
+	}
+
 	domain := domainFromURL(req.URL)
 	if domain == "" {
 		return checkResponse{
@@ -457,7 +478,7 @@ func (s *Server) runPipelineWithTier(ctx context.Context, req checkRequest, tier
 		finalVerdict, codes, blockReason, strictnessApplied, confidence, pageClass, grade =
 			legacyDecision(req, in, out, render, feedSources, oauthDec)
 	} else {
-		policyIn := buildPolicyInputs(req, in, out, render, feedSources, feedHit, oauthDec, vendorDNS)
+		policyIn := buildPolicyInputs(req, in, out, render, feedSources, feedHit, oauthDec, vendorDNS, runTier2)
 		// Phase F: when XGG_SHADOW_ENABLED=1, run the configured candidate
 		// engine in parallel and emit a diff metric + log line. The
 		// production verdict is always what we return to the user; the
@@ -545,6 +566,9 @@ func (s *Server) runPipelineWithTier(ctx context.Context, req checkRequest, tier
 	}
 	if len(_clearance) > 0 {
 		resp.ClearanceChecks = _clearance
+	}
+	if len(wrapperChain) > 0 {
+		resp.WrapperChain = wrapperChain
 	}
 	if len(decisionTrace) > 0 {
 		out := make([]decisionStep, 0, len(decisionTrace))

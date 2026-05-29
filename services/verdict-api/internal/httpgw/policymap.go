@@ -51,6 +51,7 @@ func buildPolicyInputs(
 	feedHit FeedHit, // tiered feed lookup result
 	oauthDec *oauthreg.Decision,
 	vendorDNS vendordns.ConsensusResult,
+	tier2Requested bool, // pipeline asked for sandbox evidence (regardless of outcome)
 ) policy.Inputs {
 	// Stage A: page class.
 	urlClass := pageclass.FromURL(req.URL)
@@ -191,7 +192,15 @@ func buildPolicyInputs(
 	}
 
 	// Stage F: context (feeds, OAuth, behavior, YARA, drift, challenge).
-	ctx := policy.ContextOutput{}
+	ctx := policy.ContextOutput{
+		// Tier-2 / sandbox health gate. policy.Apply uses these two
+		// fields to ESCALATE sensitive pages to ISOLATE when Tier-2
+		// evidence was needed but not collected — closes the silent
+		// fake-safety bug class. A render is "available" when the
+		// pipeline got either a fresh render OR a cached render back.
+		Tier2Requested: tier2Requested,
+		Tier2Available: render != nil,
+	}
 	// Domain age (from RDAP). in.DomainAge is time.Duration; 0 means unknown
 	// (RDAP lookup failed, no registration date in response, or RDAP not
 	// configured). DomainAgeKnown lets the policy distinguish "we know it's

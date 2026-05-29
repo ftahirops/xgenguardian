@@ -130,6 +130,15 @@ const (
 	// case). Common on multi-CDN sites and split-horizon DNS, so this is
 	// advisory/scored — suppressed on highly-trusted hosts.
 	DNSDivergenceSoft             Code = "DNS_DIVERGENCE_SOFT"
+
+	// Health-gate / degraded-mode. The engine asked for Tier-2 sandbox
+	// evidence on this URL but the sandbox call failed, timed out, or
+	// the service was unavailable. This is "missing proof," not "clean."
+	// On sensitive page classes (login/payment/oauth/install) the
+	// decision kernel escalates to ISOLATE rather than silently
+	// ALLOW-ing without the evidence that would normally fire the
+	// page-content rules. Closes the silent-fake-safety bug class.
+	Tier2DataUnavailable          Code = "TIER2_DATA_UNAVAILABLE"
 )
 
 // Template is the human-readable form rendered in interstitials and the portal.
@@ -488,6 +497,11 @@ var templates = map[Code]Template{
 		Title:    "DNS answers disagree across paths",
 		Body:     "The IP the browser connected to does not match the answer set our protective resolver saw for this domain. On most sites this is harmless multi-CDN behaviour, but on an untrusted, unknown host it can indicate split-resolver tampering.",
 		Severity: SeverityLow,
+	},
+	Tier2DataUnavailable: {
+		Title:    "Deep-scan unavailable",
+		Body:     "The page-content sandbox was unavailable when this URL was checked, so the engine could not verify the page DOM, forms, or scripts. On sensitive pages this is treated as missing proof, not as a clean signal.",
+		Severity: SeverityMedium,
 	},
 	OverlayClickjack: {
 		Title:    "Clickjacking overlay detected",
