@@ -170,6 +170,14 @@
     .trace-WARN       .trace-outcome { color: #ffc56b; }
     .trace-BLOCK      .trace-outcome { color: #ff8c8c; }
     .trace-ISOLATE    .trace-outcome { color: #c990ff; }
+
+    /* v0.3.5 — wrapper-chain (email-gateway hops) */
+    .wrapper-wrap { margin-top: 24px; }
+    .wrapper-table { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: #11141d; border: 1px solid #1c2230; border-radius: 8px; padding: 8px; }
+    .wrapper-row { display: grid; grid-template-columns: 160px 1fr; gap: 10px; padding: 4px 8px; align-items: baseline; }
+    .wrapper-row + .wrapper-row { border-top: 1px solid #161b25; }
+    .wrapper-tag { color: #6ea7ff; font-weight: 600; }
+    .wrapper-url { color: #98a0b0; word-break: break-all; }
   </style>
 </head>
 <body>
@@ -274,6 +282,12 @@
     <h2 id="formsHeader" hidden>Form actions extracted</h2>
     <div class="panel" id="formsPanel" hidden>
       <ul id="forms" class="mono"></ul>
+    </div>
+
+    <div class="wrapper-wrap" id="wrapperChain" hidden>
+      <h2>How this link reached you</h2>
+      <p style="color:#9aa3b2;font-size:13px;margin:6px 0 12px 0;">This URL came through an email-gateway wrapper. The engine analyzed the actual destination — not the wrapper host you see in the address bar.</p>
+      <div class="wrapper-table" id="wrapperChainBody"></div>
     </div>
 
     <div class="trace-wrap" id="decisionTrace" hidden>

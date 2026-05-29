@@ -271,7 +271,21 @@ func (s *Server) runPipelineWithTier(ctx context.Context, req checkRequest, tier
 	isShortenerLanding := isURLShortener(domain)
 	isTrustedHost := brandgraph.IsAnyTrust(domain)
 
-	forceTier2 := tierHint == "deep" || tierHint == "medium"
+	// Wave 2 — Tier-2 dispatch tuning.
+	//
+	// forceTier2 sources:
+	//   - tierHint "deep"/"medium" (scheduler)
+	//   - req.ForceRescan: extension's "rescan" button. The user is
+	//     explicitly asking for a deeper look on a URL we may have
+	//     already verdicted ALLOW; honor that as a sandbox force.
+	//   - XGG_TIER2_FORCE_UNTRUSTED=1 + host not in brandgraph: operator
+	//     opted in to "render every unknown host once." Render cache
+	//     still bounds the cost (TTL ~4h), so this is fail-once-per-host
+	//     not fail-every-request.
+	forceTier2 := tierHint == "deep" || tierHint == "medium" || req.ForceRescan
+	if !forceTier2 && osGetenv("XGG_TIER2_FORCE_UNTRUSTED") == "1" && !isTrustedHost {
+		forceTier2 = true
+	}
 	autoTier2 := shouldRunTier2(t1.Score, req.URL) || openerIsShortener
 	runTier2 := tierHint != "light" && (forceTier2 || (autoTier2 && !isShortenerLanding && !(isTrustedHost && t1.Score < 0.4)))
 
@@ -1050,9 +1064,18 @@ func shouldRunTier2(t1Score float64, raw string) bool {
 		}
 	}
 	// Suspicious TLDs commonly used for short-lived attack infra.
+	// Includes piracy-favored ccTLDs (.to/.ws/.cc/.pw) — Tongan and
+	// Samoan ccTLDs are heavily used for streaming-piracy sites
+	// (uflix.to, soap2day.to, fmovies.to class) that look like ordinary
+	// content sites to Tier-1 but ship third-party ad-tech, popunders,
+	// and clickjack overlays the sandbox needs to actually see. Without
+	// Tier-2 these slip through because there's no feed hit, no
+	// homoglyph, no random-host pattern, no fresh domain.
 	for _, sus := range []string{
 		".cam", ".boo", ".tk", ".ml", ".ga", ".cf", ".gq",
 		".click", ".top", ".xyz", ".rest", ".buzz", ".loan", ".work",
+		// Piracy / scam-favored ccTLDs added Wave 2:
+		".to", ".ws", ".cc", ".pw",
 	} {
 		if strings.HasSuffix(strings.SplitN(rl, "/", 4)[2], sus) {
 			return true

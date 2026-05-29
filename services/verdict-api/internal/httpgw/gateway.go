@@ -68,6 +68,10 @@ type Server struct {
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.healthz)
+	// v0.3.5 — extension-visible aggregate. Reports verdict-api health
+	// plus the reachability of sandbox-render and visual-match (which
+	// the extension can't probe directly because they bind to 127.0.0.1).
+	mux.HandleFunc("/v1/health/services", s.healthServices)
 
 	// Prometheus metrics endpoint — no authentication per standard scraping
 	// convention. The service binds 127.0.0.1:18080 and UFW restricts external
@@ -99,6 +103,58 @@ func (s *Server) Routes() http.Handler {
 
 func (s *Server) healthz(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write([]byte(`{"status":"ok"}`))
+}
+
+// healthServices probes the inner microservices (sandbox-render +
+// visual-match) and returns one aggregate JSON. Used by the extension
+// popup to render a single "deep scan" health dot — without this the
+// extension would have no visibility into degraded operational state
+// because both services bind to 127.0.0.1.
+//
+// Probes are short-timeout (700ms) and parallel; the aggregate
+// response always returns 200 even when an inner service is down —
+// the body field reports the actual state.
+func (s *Server) healthServices(w http.ResponseWriter, r *http.Request) {
+	type svcState struct {
+		Status string `json:"status"` // "ok" | "down" | "slow"
+	}
+	type aggregate struct {
+		VerdictAPI svcState `json:"verdict_api"`
+		Sandbox    svcState `json:"sandbox"`
+		Visual     svcState `json:"visual"`
+		AllOK      bool     `json:"all_ok"`
+	}
+
+	probe := func(url string) svcState {
+		ctx, cancel := context.WithTimeout(r.Context(), 700*time.Millisecond)
+		defer cancel()
+		req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
+		client := s.SharedHTTPClient
+		if client == nil {
+			client = http.DefaultClient
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return svcState{Status: "down"}
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == 200 {
+			return svcState{Status: "ok"}
+		}
+		return svcState{Status: "down"}
+	}
+
+	out := aggregate{
+		VerdictAPI: svcState{Status: "ok"},
+		Sandbox:    probe(sandboxRenderURL() + "/healthz"),
+		Visual:     probe(visualMatchURL() + "/healthz"),
+	}
+	out.AllOK = out.VerdictAPI.Status == "ok" &&
+		out.Sandbox.Status == "ok" &&
+		out.Visual.Status == "ok"
+
+	w.Header().Set("content-type", "application/json")
+	_ = json.NewEncoder(w).Encode(out)
 }
 
 type checkRequest struct {

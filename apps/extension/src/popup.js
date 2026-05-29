@@ -58,4 +58,60 @@ function badgeClass(v) {
     e.preventDefault();
     chrome.runtime.openOptionsPage();
   });
+
+  // v0.3.5 — service-health probe. Fires three /healthz checks in
+  // parallel with a 1.5s timeout each. Renders three pill-style dots:
+  // green when ok, yellow when slow/unreachable, red when explicitly
+  // 5xx. Gives the user a visible signal that "the engine sees X but
+  // not Y" instead of silent degradation.
+  pingHealth().catch(() => {});
 })();
+
+async function pingHealth() {
+  const cfg = await chrome.storage.local.get({
+    apiBase: "http://135.181.79.11:18080",
+  });
+  const apiBase = (cfg.apiBase || "").replace(/\/+$/, "");
+  if (!apiBase) {
+    setHealthState("healthVerdict", "down", "no API base configured");
+    setHealthState("healthSandbox", "down", "no API base configured");
+    return;
+  }
+  setHealthState("healthVerdict", "warn");
+  setHealthState("healthSandbox", "warn");
+  try {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 2000);
+    const r = await fetch(apiBase + "/v1/health/services", {
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    clearTimeout(t);
+    if (!r.ok) {
+      setHealthState("healthVerdict", "down");
+      setHealthState("healthSandbox", "down", "verdict-api did not return health");
+      return;
+    }
+    const body = await r.json();
+    setHealthState("healthVerdict", body.verdict_api?.status === "ok" ? "ok" : "down");
+    // Deep-scan dot reflects sandbox AND visual jointly. If either is
+    // down the dot is yellow ("partial coverage"); both down is red.
+    const sb = body.sandbox?.status === "ok";
+    const vi = body.visual?.status === "ok";
+    if (sb && vi)        setHealthState("healthSandbox", "ok",   "sandbox + visual ok");
+    else if (sb || vi)   setHealthState("healthSandbox", "warn", "partial: " + (sb ? "visual down" : "sandbox down"));
+    else                 setHealthState("healthSandbox", "down", "sandbox + visual unreachable");
+  } catch {
+    // verdict-api unreachable from the user's browser.
+    setHealthState("healthVerdict", "down", "verdict-api unreachable");
+    setHealthState("healthSandbox", "down", "verdict-api unreachable");
+  }
+}
+
+function setHealthState(id, state, title) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.remove("ok", "warn", "down");
+  el.classList.add(state);
+  if (title) el.title = title;
+}

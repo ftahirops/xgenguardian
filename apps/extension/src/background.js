@@ -593,6 +593,39 @@ function holdingURL(target, opener, openerVerdict) {
   return chrome.runtime.getURL("src/holding.html") + "?" + p.toString();
 }
 
+// v0.3.5 — holding-page retry guard. Defense-in-depth against any future
+// extension loop bug like the ERR_NETWORK_ACCESS_DENIED loop in v0.3.3.
+// Bounds: max RETRY_INTERCEPT_LIMIT intercepts of the same URL within
+// RETRY_INTERCEPT_WINDOW_MS. When the limit trips, we STOP intercepting
+// and let the navigation through with a logged warning. Better to let a
+// borderline-suspicious URL pass than to trap the user in an infinite
+// flip between holding → /v1/check → tab.update → re-fire.
+const RETRY_INTERCEPT_LIMIT     = 3;
+const RETRY_INTERCEPT_WINDOW_MS = 30_000;
+
+async function shouldThrottleIntercept(target) {
+  try {
+    const key = "rt:" + (await sha256(normalizeForToken(target)));
+    const now = Date.now();
+    const obj = await chrome.storage.session.get({ [key]: { count: 0, windowStart: now } });
+    let rec = obj[key];
+    if (now - rec.windowStart > RETRY_INTERCEPT_WINDOW_MS) {
+      rec = { count: 0, windowStart: now };
+    }
+    rec.count += 1;
+    await chrome.storage.session.set({ [key]: rec });
+    if (rec.count > RETRY_INTERCEPT_LIMIT) {
+      console.warn("XGG: retry-intercept limit exceeded for", target,
+        "count=" + rec.count, "— letting navigation through to break loop");
+      return true;
+    }
+    return false;
+  } catch {
+    // session storage failure is best-effort; never block the navigation.
+    return false;
+  }
+}
+
 // applyVerdict — decides what to do with the tab once we have a verdict.
 async function applyVerdict(tabId, target, verdict, opener) {
   const page = pageFor(verdict);
@@ -639,6 +672,11 @@ async function stashVerdictForPage(url, verdict) {
       trust_contributors: verdict.trust_contributors || [],
       clearance_checks: verdict.clearance_checks || {},
       decision_trace: verdict.decision_trace || [],
+      // v0.3.5 — email-gateway wrapper hops (SafeLinks/Proofpoint/...).
+      // Surfaced to the warn/block page so the user sees "this came in
+      // through a SafeLinks wrapper that pointed at <target>" instead
+      // of an opaque verdict on a host they don't recognise.
+      wrapper_chain: verdict.wrapper_chain || [],
       evidence_id: verdict.evidence_id || "",
       scanned_at: verdict.scanned_at || new Date().toISOString(),
     };
@@ -746,6 +784,12 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
   // cross-origin redirect to chrome-extension:// is forbidden by Chrome.
   // In that case let Chrome's native error page stand rather than
   // surfacing an ambiguous extension-error to the user.
+  //
+  // v0.3.5 — retry guard: bail out if this URL has been intercepted
+  // more than RETRY_INTERCEPT_LIMIT times in the rolling window.
+  if (await shouldThrottleIntercept(url)) {
+    return;
+  }
   try {
     await chrome.tabs.update(details.tabId, {
       url: holdingURL(url, null, null),

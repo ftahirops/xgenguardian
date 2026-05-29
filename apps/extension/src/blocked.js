@@ -130,6 +130,30 @@ const verdict    = (p.get("v") || "BLOCK").toUpperCase();
   try {
     const all = await chrome.storage.session.get({ verdictStash: {} });
     const stashed = all?.verdictStash?.[url];
+    // v0.3.5 — wrapper-chain render
+    if (stashed?.wrapper_chain?.length) {
+      const wWrap = document.getElementById("wrapperChain");
+      const wBody = document.getElementById("wrapperChainBody");
+      if (wWrap && wBody) {
+        wWrap.hidden = false;
+        while (wBody.firstChild) wBody.removeChild(wBody.firstChild);
+        const niceName = {
+          safelinks:  "Microsoft SafeLinks",
+          proofpoint: "Proofpoint URL Defense",
+          mimecast:   "Mimecast",
+          cisco:      "Cisco Secure Email",
+          barracuda:  "Barracuda",
+          symantec:   "Symantec / Broadcom",
+          gmail:      "Gmail link redirect",
+        };
+        for (const hop of stashed.wrapper_chain) {
+          const row = el("div", { className: "wrapper-row" });
+          row.appendChild(el("span", { className: "wrapper-tag", text: niceName[hop?.wrapper] || hop?.wrapper || "wrapper" }));
+          row.appendChild(el("span", { className: "wrapper-url", text: hop?.url || "" }));
+          wBody.appendChild(row);
+        }
+      }
+    }
     if (stashed?.decision_trace?.length) {
       const wrap = document.getElementById("decisionTrace");
       const body = document.getElementById("decisionTraceBody");

@@ -26,6 +26,15 @@
     a.cta { display:block; margin-top:18px; padding: 8px 12px; background:#5e8bff; color:white; text-decoration:none; text-align:center; border-radius:6px; font-weight:600; }
     a.link { color:#5e8bff; font-size:12px; text-decoration:none; }
     label { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #cfd4dd; margin-top: 8px; }
+
+    /* v0.3.5 — service-health row */
+    .health-wrap { margin-top: 14px; padding-top: 12px; border-top: 1px solid #1c2230; }
+    .health-row  { display: flex; gap: 8px; flex-wrap: wrap; font-size: 11px; }
+    .health-dot  { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; background: #11141d; border: 1px solid #1c2230; }
+    .health-dot .dot { width: 6px; height: 6px; border-radius: 50%; background: #6f7787; }
+    .health-dot.ok   .dot { background: #52c41a; }
+    .health-dot.warn .dot { background: #faad14; }
+    .health-dot.down .dot { background: #ff6b6b; }
   </style>
 </head>
 <body>
@@ -53,6 +62,15 @@
   </label>
 
   <a class="cta" id="evidence" href="#" target="_blank">View full evidence →</a>
+
+  <div class="health-wrap">
+    <div class="label" style="margin-bottom: 6px;">Engine health</div>
+    <div class="health-row" id="healthRow">
+      <span class="health-dot" id="healthVerdict" title="Verdict engine reachable from this browser"><span class="dot"></span>verdict engine</span>
+      <span class="health-dot" id="healthSandbox" title="Sandbox + visual health (reported by verdict engine)"><span class="dot"></span>deep scan</span>
+    </div>
+  </div>
+
   <p style="margin-top:14px; text-align:center;">
     <a class="link" id="options" href="#">Settings</a>
   </p>

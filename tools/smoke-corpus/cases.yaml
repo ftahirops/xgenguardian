@@ -1,0 +1,294 @@
+# XGenGuardian smoke corpus — 50 cases.
+#
+# Each case names a URL and the expected verdict band. The run script
+# (run.py) hits /v1/check, classifies the actual verdict, and computes a
+# confusion matrix per category.
+#
+# Verdict bands:
+#   allow   — engine should return ALLOW (or CLEAN); legit safe page
+#   warn    — engine should return WARN; suspicious-but-not-decisive
+#   block   — engine should return BLOCK; high-confidence bad
+#   isolate — engine should return ISOLATE; sensitive + uncertain
+#   any-deny — accept any of WARN/BLOCK/ISOLATE (don't pin the exact level)
+#   any-allow — accept ALLOW or CLEAN
+#
+# Privacy: this corpus uses ONLY non-confidential, public, generally-known
+# URLs and synthetic phish-style URLs on .example domains. Do NOT add
+# real-victim URLs or anything containing credentials.
+#
+# Categories define the row labels in the confusion-matrix report. One
+# entry per row keeps the report human-readable even when grown to 200+.
+
+cases:
+
+  # ---- legit major brands ----
+  - name: google-homepage
+    url: https://google.com/
+    expect: any-allow
+    category: legit-major
+
+  - name: github
+    url: https://github.com/
+    expect: any-allow
+    category: legit-major
+
+  - name: paypal-homepage
+    url: https://www.paypal.com/
+    expect: any-allow
+    category: legit-major
+
+  - name: stripe-checkout-host
+    url: https://checkout.stripe.com/
+    expect: any-allow
+    category: legit-major
+
+  - name: microsoft-login
+    url: https://login.microsoftonline.com/
+    expect: any-allow
+    category: legit-major
+
+  - name: apple-id-host
+    url: https://appleid.apple.com/
+    expect: any-allow
+    category: legit-major
+
+  - name: cloudflare-corporate
+    url: https://www.cloudflare.com/
+    expect: any-allow
+    category: legit-major
+
+  # ---- ordinary content sites ----
+  - name: wikipedia
+    url: https://en.wikipedia.org/wiki/Phishing
+    expect: any-allow
+    category: legit-content
+
+  - name: bbc-news
+    url: https://www.bbc.com/news
+    expect: any-allow
+    category: legit-content
+
+  - name: stackoverflow
+    url: https://stackoverflow.com/
+    expect: any-allow
+    category: legit-content
+
+  - name: mozilla-developer
+    url: https://developer.mozilla.org/
+    expect: any-allow
+    category: legit-content
+
+  # ---- developer / install pages ----
+  - name: claude-quickstart
+    url: https://docs.anthropic.com/en/docs/claude-code/quickstart
+    expect: any-allow
+    category: legit-dev
+
+  - name: rustup
+    url: https://rustup.rs/
+    expect: any-allow
+    category: legit-dev
+
+  # ---- email-gateway wrappers (must unwrap and analyse target) ----
+  - name: safelinks-benign
+    url: https://eur01.safelinks.protection.outlook.com/?url=https%3A%2F%2Fwww.microsoft.com%2F&data=00
+    expect: any-allow
+    category: wrapper-benign
+
+  - name: proofpoint-v2-benign
+    url: https://urldefense.proofpoint.com/v2/url?u=https%3A%2F%2Fwww.bbc.com%2F&d=abc
+    expect: any-allow
+    category: wrapper-benign
+
+  - name: gmail-link-redirect-benign
+    url: https://www.google.com/url?q=https%3A%2F%2Fwww.wikipedia.org%2F
+    expect: any-allow
+    category: wrapper-benign
+
+  - name: safelinks-spoof-phish-target
+    url: https://nam01.safelinks.protection.outlook.com/?url=https%3A%2F%2Fmicrosoft-login-verify.example%2Flogin
+    expect: any-deny
+    category: wrapper-phish
+
+  - name: mimecast-pointing-at-fresh-host
+    url: https://protect-eu.mimecast.com/s/abc?domain=secure-bank-login-update.example
+    expect: any-deny
+    category: wrapper-phish
+
+  # ---- spoofed wrapper hosts (security regression — must NOT be trusted) ----
+  - name: spoof-mimecast-host
+    url: https://mimecast.com.attacker.example/s/abc?domain=benign-target.example
+    expect: any-allow
+    category: spoof-wrapper
+
+  - name: spoof-safelinks-host
+    url: https://safelinks.protection.outlook.com.attacker.example/?url=https://benign.example/
+    expect: any-allow
+    category: spoof-wrapper
+
+  # ---- URL shorteners ----
+  - name: bitly-home
+    url: https://bitly.com/
+    expect: any-allow
+    category: shortener
+
+  - name: tco-home
+    url: https://t.co/
+    expect: any-allow
+    category: shortener
+
+  # ---- piracy-class ccTLDs (Wave 2 dispatch tuning — should reach Tier-2) ----
+  - name: piracy-tld-to
+    url: https://uflix.to/
+    expect: any
+    category: piracy-tld
+
+  - name: piracy-tld-cc
+    url: https://example.cc/
+    expect: any
+    category: piracy-tld
+
+  - name: piracy-tld-ws
+    url: https://example.ws/
+    expect: any
+    category: piracy-tld
+
+  - name: piracy-tld-pw
+    url: https://example.pw/
+    expect: any
+    category: piracy-tld
+
+  # ---- synthetic phishing patterns (PHISH-TEST.EXAMPLE per CONTRIBUTING) ----
+  - name: brand-impersonation-microsoft
+    url: https://microsoft-login-verify.example/login
+    expect: any-deny
+    category: synth-phish
+
+  - name: brand-impersonation-paypal
+    url: https://paypal-account-secure.example/signin
+    expect: any-deny
+    category: synth-phish
+
+  - name: brand-impersonation-google
+    url: https://google-account-recovery.example/verify
+    expect: any-deny
+    category: synth-phish
+
+  - name: homoglyph-google
+    url: https://g00gle.com/
+    expect: any-deny
+    category: synth-phish
+
+  - name: random-host-login
+    url: https://kj2nx7vc.example/login
+    expect: any-deny
+    category: synth-phish
+
+  # ---- raw IPs (hard-block class) ----
+  - name: raw-ip-binary-drop
+    url: http://1.2.3.4/x86
+    expect: block
+    category: raw-ip
+
+  - name: raw-ip-bare
+    url: http://198.51.100.10/
+    expect: any-deny
+    category: raw-ip
+
+  # ---- suspicious TLDs (well-known abuse-favored) ----
+  - name: tld-tk
+    url: http://something.tk/
+    expect: any
+    category: sus-tld
+
+  - name: tld-xyz
+    url: http://example.xyz/
+    expect: any
+    category: sus-tld
+
+  - name: tld-click
+    url: http://landing.click/
+    expect: any
+    category: sus-tld
+
+  # ---- shared-hosting platforms (often abused; engine should not auto-trust) ----
+  - name: vercel-tenant
+    url: https://random-tenant.vercel.app/
+    expect: any
+    category: shared-host
+
+  - name: netlify-tenant
+    url: https://anything-here.netlify.app/
+    expect: any
+    category: shared-host
+
+  - name: github-io-tenant
+    url: https://someuser.github.io/
+    expect: any
+    category: shared-host
+
+  # ---- HTTP-only (no TLS) ----
+  - name: http-only-major
+    url: http://example.com/
+    expect: any-allow
+    category: http-only
+
+  # ---- sensitive page classes (must isolate when uncertain) ----
+  - name: login-on-fresh-unknown
+    url: https://newdomain-no-history.example/login
+    expect: any-deny
+    category: sensitive-unknown
+
+  - name: payment-checkout-unknown
+    url: https://checkout-unknown-merchant.example/pay
+    expect: any-deny
+    category: sensitive-unknown
+
+  # ---- malformed (should not crash) ----
+  - name: javascript-scheme
+    url: "javascript:alert(1)"
+    expect: any
+    category: malformed
+
+  - name: data-scheme
+    url: "data:text/html,<script>alert(1)</script>"
+    expect: any
+    category: malformed
+
+  # ---- defense-in-depth: known-good large CDNs (Tier-2 should fast-path) ----
+  - name: cloudflare-cdn-script
+    url: https://cdnjs.cloudflare.com/
+    expect: any-allow
+    category: legit-cdn
+
+  - name: google-fonts
+    url: https://fonts.googleapis.com/
+    expect: any-allow
+    category: legit-cdn
+
+  - name: jsdelivr
+    url: https://cdn.jsdelivr.net/
+    expect: any-allow
+    category: legit-cdn
+
+  - name: unpkg
+    url: https://unpkg.com/
+    expect: any-allow
+    category: legit-cdn
+
+  # ---- popular SaaS that route differently ----
+  - name: slack-app
+    url: https://app.slack.com/
+    expect: any-allow
+    category: legit-saas
+
+  - name: notion
+    url: https://www.notion.so/
+    expect: any-allow
+    category: legit-saas
+
+  # ---- trailing-dot FQDN (security regression) ----
+  - name: fqdn-trailing-dot
+    url: https://example.com./
+    expect: any-allow
+    category: edge-case

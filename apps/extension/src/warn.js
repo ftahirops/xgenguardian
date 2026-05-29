@@ -83,7 +83,33 @@ renderChecklistFromCodes(initialCodes, null);
 // silently if absent (page opened directly, or storage was cleared).
 loadStashedVerdict(rawU).then((stashed) => {
   if (stashed?.decision_trace?.length) renderDecisionTrace(stashed.decision_trace);
+  if (stashed?.wrapper_chain?.length) renderWrapperChain(stashed.wrapper_chain);
 }).catch(() => {});
+
+function renderWrapperChain(chain) {
+  const wrap = document.getElementById("wrapperChain");
+  if (!wrap) return;
+  wrap.hidden = false;
+  const body = document.getElementById("wrapperChainBody");
+  if (!body) return;
+  clearChildren(body);
+  // Render each hop: "via SafeLinks: <wrapper-url>"
+  const niceName = {
+    safelinks:  "Microsoft SafeLinks",
+    proofpoint: "Proofpoint URL Defense",
+    mimecast:   "Mimecast",
+    cisco:      "Cisco Secure Email",
+    barracuda:  "Barracuda",
+    symantec:   "Symantec / Broadcom",
+    gmail:      "Gmail link redirect",
+  };
+  for (const hop of chain) {
+    const row = el("div", { className: "wrapper-row" });
+    row.appendChild(el("span", { className: "wrapper-tag", text: niceName[hop?.wrapper] || hop?.wrapper || "wrapper" }));
+    row.appendChild(el("span", { className: "wrapper-url", text: hop?.url || "" }));
+    body.appendChild(row);
+  }
+}
 
 async function loadStashedVerdict(target) {
   try {
