@@ -71,3 +71,7 @@ coverage.html
 
 # Chrome extension auto-generated indexed rulesets (regenerated on load)
 apps/extension/_metadata/
+
+# Debug HAR captures + ad-hoc inspection files (3 MB+ each, not source)
+*.har
+/uflix
