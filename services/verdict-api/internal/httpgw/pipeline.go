@@ -444,6 +444,10 @@ func (s *Server) runPipelineWithTier(ctx context.Context, req checkRequest, tier
 		pageClass         string
 		grade             string
 		_clearance        map[string]string
+		// Decision trace — every rule the policy engine evaluated. Surfaced
+		// on the response + the structured `check` log line so an operator
+		// can see exactly how the verdict was decided per URL.
+		decisionTrace []policy.DecisionStep
 		// Phase D: trust score + contributors lifted out so the response
 		// assembly block can surface them in the evidence UI.
 		trustScore   float64
@@ -475,6 +479,7 @@ func (s *Server) runPipelineWithTier(ctx context.Context, req checkRequest, tier
 		grade = chooseGrade(finalVerdict, confidence)
 		// Stash policy clearance checks for response assembly below.
 		_clearance = policyOut.ClearanceChecks
+		decisionTrace = policyOut.DecisionTrace
 		trustScore = policyIn.TrustScore
 		trustContrib = policyIn.TrustContributors
 	}
@@ -540,6 +545,19 @@ func (s *Server) runPipelineWithTier(ctx context.Context, req checkRequest, tier
 	}
 	if len(_clearance) > 0 {
 		resp.ClearanceChecks = _clearance
+	}
+	if len(decisionTrace) > 0 {
+		out := make([]decisionStep, 0, len(decisionTrace))
+		for _, s := range decisionTrace {
+			out = append(out, decisionStep{
+				Stage:   s.Stage,
+				Code:    s.Code,
+				Outcome: s.Outcome,
+				Detail:  s.Detail,
+				Weight:  s.Weight,
+			})
+		}
+		resp.DecisionTrace = out
 	}
 	// Phase D: surface the trust score + contributors so the evidence UI
 	// can show *why* a verdict softened or didn't. Always populated (even

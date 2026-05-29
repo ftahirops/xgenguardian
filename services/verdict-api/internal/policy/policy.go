@@ -393,6 +393,26 @@ type softAccum struct {
 func (s *softAccum) fire(r *Result, weight float64, code reasons.Code) {
 	s.risk += weight
 	r.ReasonCodes = append(r.ReasonCodes, string(code))
+	r.trace("F.4", string(code), "fired", "soft signal", weight)
+}
+
+// suppressed records that a soft rule WOULD have fired but trust
+// suppressed it. Visible in the decision trace so an operator can see
+// exactly which rules trust score muted on this URL.
+func (s *softAccum) suppressed(r *Result, code reasons.Code, why string) {
+	r.trace("F.4", string(code), "suppressed", why, 0)
+}
+
+// trace appends one decision step. Cheap; called dozens of times per
+// /v1/check by design — the trace is the user-visible debug payload.
+func (r *Result) trace(stage, code, outcome, detail string, weight float64) {
+	r.DecisionTrace = append(r.DecisionTrace, DecisionStep{
+		Stage:   stage,
+		Code:    code,
+		Outcome: outcome,
+		Detail:  detail,
+		Weight:  weight,
+	})
 }
 
 // HighTrustScoreThreshold is the trust-score floor at which soft rules
@@ -433,6 +453,19 @@ type TrustContributor struct {
 	Weight float64
 }
 
+// DecisionStep is one entry in the per-Apply decision trace. The trace is
+// emitted on the /v1/check response, the structured `check` log line, and
+// the livetail debug stream. Every meaningful "the engine considered X and
+// decided Y" branch records a step here so an operator can read the trail
+// end-to-end and verify the verdict is solid.
+type DecisionStep struct {
+	Stage   string  `json:"stage"`             // e.g. "CI", "0", "F.1", "F.4", "F4soft", "G"
+	Code    string  `json:"code,omitempty"`    // reason code this step concerns, when applicable
+	Outcome string  `json:"outcome"`           // "fired" | "suppressed" | "skip" | "pass" | "fail"
+	Detail  string  `json:"detail,omitempty"`  // short human explanation
+	Weight  float64 `json:"weight,omitempty"`  // soft-rule weight contribution (Phase E)
+}
+
 // Result is what gateway.go turns into the HTTP response.
 type Result struct {
 	Verdict     Verdict
@@ -441,8 +474,17 @@ type Result struct {
 	BlockReason string // human-readable summary for blocked.html
 
 	// StageOutcome maps stage letter → "pass" | "fail" | "unknown" | "skip"
-	// for analytics + the report-page drill-down.
+	// for analytics + the report-page drill-down. Coarse-grained; for full
+	// per-rule decision evidence see DecisionTrace below.
 	StageOutcome map[string]string
+
+	// DecisionTrace — append-only log of every rule the engine evaluated:
+	// hard-rule short-circuits, soft-rule fires, soft-rule suppressions on
+	// trust score, the soft-mapping threshold result, and the final verdict
+	// step. Order is the order in which rules were evaluated. Surfaced to
+	// the user via the /v1/check response so the block-page can render
+	// "here is exactly how we decided."
+	DecisionTrace []DecisionStep
 
 	// ClearanceChecks — per-gate pass/fail summary for Ultra mode (always
 	// populated in Ultra; populated best-effort in other modes for the
@@ -489,8 +531,12 @@ func Apply(in Inputs) Result {
 		r.BlockReason = "This public domain resolved to a private IP (" + in.Context.BrowserRemoteIP + "). The DNS path appears to be hijacked."
 		r.ReasonCodes = append(r.ReasonCodes, string(reasons.PublicDomainPrivateIP))
 		r.StageOutcome["CI"] = "fail-public-domain-private-ip"
+		r.trace("CI", string(reasons.PublicDomainPrivateIP), "fired",
+			"public domain hit private IP "+in.Context.BrowserRemoteIP+" — DNS-path hijack", 0)
+		r.trace("G", "", "fail", "verdict=BLOCK (hard rule, ignores trust)", 0)
 		return r
 	}
+	r.trace("CI", "", "pass", "browser remote IP not private (or absent)", 0)
 
 	// --- Stage 0: VendorDNS multi-provider consensus (highest-priority BLOCK) ---
 	//
@@ -511,7 +557,16 @@ func Apply(in Inputs) Result {
 		r.BlockReason = "Domain is on the blocklist of multiple independent protective-DNS providers (" + blockedBy + ")."
 		r.ReasonCodes = append(r.ReasonCodes, string(reasons.VendorDNSConsensusBlock))
 		r.StageOutcome["0"] = "fail-vendordns-consensus"
+		r.trace("0", string(reasons.VendorDNSConsensusBlock), "fired",
+			"vendor-DNS consensus: "+blockedBy, 0)
+		r.trace("G", "", "fail", "verdict=BLOCK (hard rule)", 0)
 		return r
+	}
+	if in.Context.VendorDNSBlocked && in.TrustedIdentity {
+		r.trace("0", string(reasons.VendorDNSConsensusBlock), "suppressed",
+			"vendor DNS would block, but host is in trustreg — likely vendor over-block on a real brand", 0)
+	} else {
+		r.trace("0", "", "pass", "no vendor-DNS consensus block", 0)
 	}
 
 	// --- Stage F.0: category-feed BLOCK + content-vs-security split ---
@@ -1132,15 +1187,23 @@ func Apply(in Inputs) Result {
 		//   - 2+ strong indicators (clear obfuscation pattern), OR
 		//   - 1 strong + high-entropy (entropy corroborates a strong signal)
 		fire := strong >= 2 || (strong >= 1 && hasEntropy)
-		if fire && !in.IsHighlyTrusted() {
+		switch {
+		case fire && !in.IsHighlyTrusted():
 			soft.fire(&r, softWeightObfuscatedJS, reasons.ObfuscatedJSDetected)
 			r.StageOutcome["F4"] = "warn-obfuscated-js"
+		case fire && in.IsHighlyTrusted():
+			soft.suppressed(&r, reasons.ObfuscatedJSDetected,
+				"obfuscated JS indicators present but host is highly trusted")
 		}
 	}
 
-	if in.Context.HasCrossOriginIframe && !in.IsHighlyTrusted() {
+	switch {
+	case in.Context.HasCrossOriginIframe && !in.IsHighlyTrusted():
 		soft.fire(&r, softWeightHiddenIframeXOrigin, reasons.HiddenIframeCrossOrigin)
 		r.StageOutcome["F4"] = "warn-hidden-iframe"
+	case in.Context.HasCrossOriginIframe && in.IsHighlyTrusted():
+		soft.suppressed(&r, reasons.HiddenIframeCrossOrigin,
+			"hidden cross-origin iframe present but host is highly trusted")
 	}
 
 	if in.Context.RiskyDownloadCount > 0 && !in.IsHighlyTrusted() {
@@ -1161,6 +1224,9 @@ func Apply(in Inputs) Result {
 			soft.fire(&r, softWeightSuspiciousDownload, reasons.SuspiciousDownloadOffered)
 			r.StageOutcome["F4"] = "warn-download-non-dev"
 		}
+	} else if in.Context.RiskyDownloadCount > 0 && in.IsHighlyTrusted() {
+		soft.suppressed(&r, reasons.SuspiciousDownloadOffered,
+			"risky download links present but host is highly trusted")
 		// devPage + OfficialInstallMatch already gates ALLOW elsewhere; no action.
 	}
 
@@ -1173,9 +1239,13 @@ func Apply(in Inputs) Result {
 	// footer). Mozilla has similar. Threshold of 5 produced FPs. 8+
 	// cross-origin hidden anchors on an untrusted host is the pattern of
 	// an attack page scraping referrers or hiding a link farm.
-	if in.Context.HiddenSuspiciousCount >= 8 && !in.IsHighlyTrusted() {
+	switch {
+	case in.Context.HiddenSuspiciousCount >= 8 && !in.IsHighlyTrusted():
 		soft.fire(&r, softWeightHiddenAnchors, reasons.HiddenMaliciousLink)
 		r.StageOutcome["F4"] = "warn-hidden-anchors"
+	case in.Context.HiddenSuspiciousCount >= 8 && in.IsHighlyTrusted():
+		soft.suppressed(&r, reasons.HiddenMaliciousLink,
+			"many hidden cross-origin anchors but host is highly trusted")
 	}
 
 	// --- DNS_DIVERGENCE_SOFT (Phase E) ---
@@ -1189,9 +1259,13 @@ func Apply(in Inputs) Result {
 	// The HARD divergence case (browser → private IP for public domain)
 	// is PUBLIC_DOMAIN_PRIVATE_IP at Stage CI, which ignores trust and
 	// short-circuits BLOCK far above this point.
-	if in.Context.ResolverDivergence && !in.IsHighlyTrusted() {
+	switch {
+	case in.Context.ResolverDivergence && !in.IsHighlyTrusted():
 		soft.fire(&r, softWeightDNSDivergenceSoft, reasons.DNSDivergenceSoft)
 		r.StageOutcome["F4"] = "soft-dns-divergence"
+	case in.Context.ResolverDivergence && in.IsHighlyTrusted():
+		soft.suppressed(&r, reasons.DNSDivergenceSoft,
+			"DNS divergence (multi-CDN drift) but host is highly trusted")
 	}
 
 	// --- Phase E soft-rule mapping ---
@@ -1209,6 +1283,14 @@ func Apply(in Inputs) Result {
 			r.Confidence = 0.65
 		}
 		r.StageOutcome["F4soft"] = "warn-soft-accum"
+		r.trace("F4soft", "", "fired",
+			"accumulated soft risk crossed warn threshold", soft.risk)
+	} else if soft.risk > 0 {
+		// Some soft signals fired but didn't cross the threshold (e.g. a
+		// half-weight DNS divergence alone). Record explicitly so the
+		// operator can see the engine considered them.
+		r.trace("F4soft", "", "pass",
+			"soft signals fired but under warn threshold", soft.risk)
 	}
 
 	// --- Behavioral abuse (popup storm / clipboard hijack) → WARN ---
@@ -1232,6 +1314,26 @@ func Apply(in Inputs) Result {
 		r.Confidence = 0.5
 		r.StageOutcome["G"] = "allow"
 	}
+
+	// --- Trust-score summary in the trace ---
+	// One row per call, regardless of verdict. Gives the operator a
+	// single line they can scan to see "the engine considered this host
+	// trust-X, that's why the soft rules were/were-not suppressed."
+	switch {
+	case in.TrustedAnyScope || in.TrustedIdentity:
+		r.trace("trust", "", "pass",
+			"host is in brandgraph/trustreg — soft rules suppressed", 0)
+	case in.TrustScore >= HighTrustScoreThreshold:
+		r.trace("trust", "", "pass",
+			"trust score crossed soft-suppression threshold", in.TrustScore)
+	default:
+		r.trace("trust", "", "skip",
+			"host not highly trusted; soft rules eligible to fire", in.TrustScore)
+	}
+
+	// --- Final verdict step — always last in the trace ---
+	r.trace("G", "", string(r.Verdict),
+		"final verdict", r.Confidence)
 
 	// --- Paranoid (Executive Mode) elevation, applied last ---
 	// Promotes unknown / B-grade verdicts to ISOLATE for sensitive classes.

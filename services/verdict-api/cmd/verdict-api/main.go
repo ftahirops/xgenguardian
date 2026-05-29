@@ -37,7 +37,13 @@ import (
 
 func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	// Logger format: JSON when XGG_LOG_JSON=1 (machine consumers like the
+	// livetail tool); ConsoleWriter otherwise (human reads in journal).
+	if env("XGG_LOG_JSON", "") == "1" {
+		log.Logger = log.Output(os.Stderr)
+	} else {
+		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	}
 
 	// Register Prometheus metrics before anything else.
 	metrics.MustRegister(prometheus.DefaultRegisterer)

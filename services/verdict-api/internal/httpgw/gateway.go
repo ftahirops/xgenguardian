@@ -176,6 +176,23 @@ type checkResponse struct {
 	// TrustContributors — labeled signals that moved the score.
 	// Rendered in the evidence UI as "trust came from X, Y, Z."
 	TrustContributors []trustContributor `json:"trust_contributors,omitempty"`
+
+	// DecisionTrace — append-only log of every meaningful rule the engine
+	// evaluated for this URL. Each step records the stage, the reason
+	// code (if any), the outcome (fired/suppressed/pass/skip/fail), and
+	// a short human detail. Surfaced so the user can see exactly how
+	// we decided — the block page renders this as a transparency table
+	// and the livetail tool prints it line-by-line.
+	DecisionTrace []decisionStep `json:"decision_trace,omitempty"`
+}
+
+// decisionStep is the wire-format mirror of policy.DecisionStep.
+type decisionStep struct {
+	Stage   string  `json:"stage"`
+	Code    string  `json:"code,omitempty"`
+	Outcome string  `json:"outcome"`
+	Detail  string  `json:"detail,omitempty"`
+	Weight  float64 `json:"weight,omitempty"`
 }
 
 // trustContributor is the wire-format mirror of policy.TrustContributor.
@@ -214,11 +231,35 @@ func (s *Server) check(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
 
+	t0 := time.Now()
 	resp := s.runPipeline(ctx, req)
+	latencyMs := time.Since(t0).Milliseconds()
 
 	w.Header().Set("content-type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
-	log.Info().Str("url", sanitizeURLForLog(req.URL)).Str("verdict", resp.Verdict).Msg("check")
+	// Rich per-check log line — consumed by tools/livetail/livetail.sh for
+	// human-readable streaming. Every field below is safe to publish: URL
+	// is sanitized (query stripped), and no client_id / IP is included.
+	log.Info().
+		Str("url", sanitizeURLForLog(req.URL)).
+		Str("verdict", resp.Verdict).
+		Float64("confidence", resp.Confidence).
+		Str("grade", resp.Grade).
+		Str("page_class", resp.PageClass).
+		Strs("reason_codes", resp.ReasonCodes).
+		Float64("trust_score", resp.TrustScore).
+		Int("domain_age_days", resp.DomainAgeDays).
+		Bool("cached", resp.Cached).
+		Bool("is_challenge_page", resp.IsChallengePage).
+		Bool("strictness_applied", resp.StrictnessApplied).
+		Str("visual_top_brand", resp.VisualTopBrand).
+		Float64("visual_top_score", resp.VisualTopScore).
+		Strs("vendor_dns_blocked_by", resp.VendorDNSBlockedBy).
+		Interface("clearance", resp.ClearanceChecks).
+		Interface("decision_trace", resp.DecisionTrace).
+		Str("block_reason", resp.BlockReason).
+		Int64("latency_ms", latencyMs).
+		Msg("check")
 }
 
 func (s *Server) rescan(w http.ResponseWriter, r *http.Request) {
