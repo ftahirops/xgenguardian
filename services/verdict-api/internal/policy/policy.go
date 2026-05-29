@@ -227,6 +227,21 @@ type ContextOutput struct {
 	// loopback, link-local, IPv6 ULA, or CGNAT space. Used together with
 	// "domain is public" to fire PUBLIC_DOMAIN_PRIVATE_IP.
 	BrowserRemoteIPIsPrivate bool
+
+	// ResolverDivergence — Phase E soft signal. True when the browser's
+	// connection IP for this domain is publicly routable but is NOT in
+	// the answer set our protective resolver saw at lookup time. Multi-
+	// CDN/anycast sites flip this constantly, so it is advisory only and
+	// always suppressed on highly-trusted hosts.
+	//
+	// The HARD divergence (browser hit a private IP for a public domain)
+	// is PUBLIC_DOMAIN_PRIVATE_IP and is handled at Stage CI — it ignores
+	// trust score and short-circuits BLOCK. This soft variant ignores
+	// neither.
+	ResolverDivergence       bool
+	// ResolverDivergenceDetail — short human string for the report-page
+	// drill-down ("browser hit 203.0.113.5, resolver saw 198.51.100.4").
+	ResolverDivergenceDetail string
 }
 
 // Inputs to Apply().
@@ -334,6 +349,52 @@ type Inputs struct {
 	TrustContributors []TrustContributor
 }
 
+// Phase E — soft-rule weights.
+//
+// Each named soft rule contributes a per-fire risk delta plus its reason
+// code. The accumulator promotes a verdict at end of the soft-rules block:
+//
+//   risk >= softWarnThreshold  → at-least WARN (if no prior verdict)
+//   risk >= softBlockThreshold → at-least BLOCK on sensitive page classes
+//
+// Single-signal weights = softWarnThreshold (1.0) so any one fired soft
+// rule preserves the pre-refactor WARN behavior — this keeps existing
+// regression tests valid. Two corroborating soft signals push toward
+// 2.0 and earn slightly higher confidence at mapping time.
+//
+// Hard rules (vendor-DNS consensus, feed-high, raw-IP-binary-drop,
+// PUBLIC_DOMAIN_PRIVATE_IP, YARA critical, pre-submit credential capture,
+// hidden mirror sink) MUST NOT route through this accumulator — they
+// short-circuit BLOCK regardless of trust.
+const (
+	softWeightRandomHostname      = 1.0
+	softWeightObfuscatedJS        = 1.0
+	softWeightHiddenIframeXOrigin = 1.0
+	softWeightSuspiciousDownload  = 1.0
+	softWeightHiddenAnchors       = 1.0
+	softWeightDNSDivergenceSoft   = 0.5 // single-side multi-CDN drift is half-weight on its own
+	softWarnThreshold             = 1.0
+)
+
+// softAccum is the per-Apply soft-rule accumulator. fire() records both
+// the risk delta and the reason code; the final mapping (toward end of
+// Apply) reads risk to decide whether to promote ALLOW → WARN.
+//
+// Reason codes are appended eagerly to r.ReasonCodes (not buffered) so
+// that report-page UI continues to surface every fired signal even when
+// the threshold is not met — matching the legacy behavior.
+type softAccum struct {
+	risk float64
+}
+
+// fire records weight + reason code for a soft rule. Caller must already
+// have checked IsHighlyTrusted (rules are responsible for their own
+// gating so they can emit telemetry without the suppression branch).
+func (s *softAccum) fire(r *Result, weight float64, code reasons.Code) {
+	s.risk += weight
+	r.ReasonCodes = append(r.ReasonCodes, string(code))
+}
+
 // HighTrustScoreThreshold is the trust-score floor at which soft rules
 // stop firing on a non-trustreg domain. Tuned conservatively at 0.7 —
 // requires multiple positive signals (e.g. 3+ year-old domain + clean
@@ -354,7 +415,10 @@ const HighTrustScoreThreshold = 0.70
 // OBFUSCATED_JS_DETECTED, RANDOM_HOSTNAME, SUSPICIOUS_DOWNLOAD_OFFERED.
 // Hard rules MUST NOT call this — they fire independent of trust.
 func (in Inputs) IsHighlyTrusted() bool {
-	if in.TrustedAnyScope {
+	// TrustedIdentity is the documented legacy alias for TrustedAnyScope
+	// (see Inputs.TrustedIdentity comment). Honor it here so callers that
+	// have not yet migrated to scoped trust still get soft-rule suppression.
+	if in.TrustedIdentity || in.TrustedAnyScope {
 		return true
 	}
 	return in.TrustScore >= HighTrustScoreThreshold
@@ -399,6 +463,11 @@ func Apply(in Inputs) Result {
 		ReasonCodes:  []string{},
 		StageOutcome: map[string]string{},
 	}
+	// Phase E — soft-rule scoring accumulator. Used by HIDDEN_MALICIOUS_LINK,
+	// RANDOM_HOSTNAME (non-sensitive path), OBFUSCATED_JS_DETECTED,
+	// HIDDEN_IFRAME_CROSS_ORIGIN, SUSPICIOUS_DOWNLOAD_OFFERED (non-sensitive
+	// path), and DNS_DIVERGENCE_SOFT. Hard rules never touch this.
+	var soft softAccum
 
 	// --- Stage CI: connection identity (Phase B hard rule) ---
 	//
@@ -945,10 +1014,12 @@ func Apply(in Inputs) Result {
 			// rules can still surface other issues.
 			r.StageOutcome["F"] = "suspicious-host-old-suppressed"
 		} else {
-			r.Verdict = Warn
-			r.Confidence = 0.6
+			// Phase E: route the soft non-sensitive path through the
+			// accumulator. BlockReason is preserved so the report-page UI
+			// still surfaces the human detail; the actual ALLOW→WARN flip
+			// is decided by the soft mapping after all signals are in.
+			soft.fire(&r, softWeightRandomHostname, reasons.RandomHostname)
 			r.BlockReason = "Hostname looks randomly generated. " + in.Context.SuspiciousHostnameDetail
-			r.ReasonCodes = append(r.ReasonCodes, string(reasons.RandomHostname))
 			r.StageOutcome["F"] = "suspicious-host"
 		}
 		// Don't return — let deeper rules (visual, sink, etc.) escalate if needed.
@@ -1062,21 +1133,13 @@ func Apply(in Inputs) Result {
 		//   - 1 strong + high-entropy (entropy corroborates a strong signal)
 		fire := strong >= 2 || (strong >= 1 && hasEntropy)
 		if fire && !in.IsHighlyTrusted() {
-			if r.Verdict == Allow {
-				r.Verdict = Warn
-				r.Confidence = 0.6
-			}
-			r.ReasonCodes = append(r.ReasonCodes, string(reasons.ObfuscatedJSDetected))
+			soft.fire(&r, softWeightObfuscatedJS, reasons.ObfuscatedJSDetected)
 			r.StageOutcome["F4"] = "warn-obfuscated-js"
 		}
 	}
 
 	if in.Context.HasCrossOriginIframe && !in.IsHighlyTrusted() {
-		if r.Verdict == Allow {
-			r.Verdict = Warn
-			r.Confidence = 0.55
-		}
-		r.ReasonCodes = append(r.ReasonCodes, string(reasons.HiddenIframeCrossOrigin))
+		soft.fire(&r, softWeightHiddenIframeXOrigin, reasons.HiddenIframeCrossOrigin)
 		r.StageOutcome["F4"] = "warn-hidden-iframe"
 	}
 
@@ -1095,11 +1158,7 @@ func Apply(in Inputs) Result {
 			r.StageOutcome["F4"] = "fail-download-on-sensitive"
 			return r
 		case !devPage:
-			if r.Verdict == Allow {
-				r.Verdict = Warn
-				r.Confidence = 0.6
-			}
-			r.ReasonCodes = append(r.ReasonCodes, string(reasons.SuspiciousDownloadOffered))
+			soft.fire(&r, softWeightSuspiciousDownload, reasons.SuspiciousDownloadOffered)
 			r.StageOutcome["F4"] = "warn-download-non-dev"
 		}
 		// devPage + OfficialInstallMatch already gates ALLOW elsewhere; no action.
@@ -1115,12 +1174,41 @@ func Apply(in Inputs) Result {
 	// cross-origin hidden anchors on an untrusted host is the pattern of
 	// an attack page scraping referrers or hiding a link farm.
 	if in.Context.HiddenSuspiciousCount >= 8 && !in.IsHighlyTrusted() {
-		if r.Verdict == Allow {
-			r.Verdict = Warn
-			r.Confidence = 0.55
-		}
-		r.ReasonCodes = append(r.ReasonCodes, string(reasons.HiddenMaliciousLink))
+		soft.fire(&r, softWeightHiddenAnchors, reasons.HiddenMaliciousLink)
 		r.StageOutcome["F4"] = "warn-hidden-anchors"
+	}
+
+	// --- DNS_DIVERGENCE_SOFT (Phase E) ---
+	//
+	// Browser connected to a publicly-routable IP the resolver did not see
+	// in the answer set. On its own this is a weak signal — multi-CDN and
+	// split-horizon DNS create benign divergence — so it carries half-
+	// weight and is suppressed on highly-trusted hosts. Paired with any
+	// other soft signal it crosses the WARN threshold; alone it does not.
+	//
+	// The HARD divergence case (browser → private IP for public domain)
+	// is PUBLIC_DOMAIN_PRIVATE_IP at Stage CI, which ignores trust and
+	// short-circuits BLOCK far above this point.
+	if in.Context.ResolverDivergence && !in.IsHighlyTrusted() {
+		soft.fire(&r, softWeightDNSDivergenceSoft, reasons.DNSDivergenceSoft)
+		r.StageOutcome["F4"] = "soft-dns-divergence"
+	}
+
+	// --- Phase E soft-rule mapping ---
+	//
+	// Promote ALLOW → WARN once accumulated soft-rule risk crosses the
+	// threshold. Hard rules above already short-circuited with their own
+	// verdicts; we never demote here. Confidence scales mildly with the
+	// number of corroborating signals so multi-signal pages report higher
+	// confidence than single-signal ones, without ever crossing into the
+	// confidence range reserved for hard evidence (>=0.75).
+	if r.Verdict == Allow && soft.risk >= softWarnThreshold {
+		r.Verdict = Warn
+		r.Confidence = 0.55
+		if soft.risk >= 2.0 {
+			r.Confidence = 0.65
+		}
+		r.StageOutcome["F4soft"] = "warn-soft-accum"
 	}
 
 	// --- Behavioral abuse (popup storm / clipboard hijack) → WARN ---

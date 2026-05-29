@@ -705,3 +705,206 @@ func TestScopedTrust_ScriptOnlyDoesNotImplyLogin(t *testing.T) {
 		t.Errorf("script-only trust must not set TrustedForLogin")
 	}
 }
+
+// ============================================================================
+// Phase E — Soft Rule Scoring
+//
+// Each of the six named soft rules must:
+//   1. Fire on an untrusted host (ALLOW → WARN at threshold)
+//   2. Suppress on a brandgraph-trusted host (TrustedAnyScope)
+//   3. Suppress on a trust-score-above-threshold host (TrustScore >= 0.70)
+//
+// The accumulator is also asserted: two soft signals raise confidence
+// without changing verdict class, and a sub-threshold signal alone does
+// not promote (DNS divergence is half-weight on purpose).
+// ============================================================================
+
+// --- HIDDEN_MALICIOUS_LINK ---
+
+func TestPhaseE_HiddenMaliciousLink_SuppressedByTrustScore(t *testing.T) {
+	r := Apply(base(Inputs{
+		TrustScore: 0.80,
+		Context: ContextOutput{
+			HiddenSuspiciousCount: 50,
+		},
+	}))
+	if r.Verdict == Warn || r.Verdict == Block {
+		t.Errorf("trust score 0.80 should suppress HIDDEN_MALICIOUS_LINK; got %s", r.Verdict)
+	}
+	if has(r.ReasonCodes, reasons.HiddenMaliciousLink) {
+		t.Errorf("HIDDEN_MALICIOUS_LINK should not be emitted under high trust")
+	}
+}
+
+// --- OBFUSCATED_JS_DETECTED ---
+
+func TestPhaseE_ObfuscatedJS_FiresOnUntrusted(t *testing.T) {
+	r := Apply(base(Inputs{
+		Context: ContextOutput{
+			ObfuscatedJSIndicators: []string{"eval", "atob_chain"},
+		},
+	}))
+	if r.Verdict != Warn {
+		t.Errorf("two strong obfuscation indicators should WARN; got %s", r.Verdict)
+	}
+	if !has(r.ReasonCodes, reasons.ObfuscatedJSDetected) {
+		t.Errorf("expected OBFUSCATED_JS_DETECTED")
+	}
+}
+
+func TestPhaseE_ObfuscatedJS_SuppressedByTrustScore(t *testing.T) {
+	r := Apply(base(Inputs{
+		TrustScore: 0.75,
+		Context: ContextOutput{
+			ObfuscatedJSIndicators: []string{"eval", "atob_chain"},
+		},
+	}))
+	if r.Verdict == Warn {
+		t.Errorf("trust score 0.75 should suppress OBFUSCATED_JS_DETECTED; got %s", r.Verdict)
+	}
+	if has(r.ReasonCodes, reasons.ObfuscatedJSDetected) {
+		t.Errorf("OBFUSCATED_JS_DETECTED should not be emitted under high trust")
+	}
+}
+
+// --- HIDDEN_IFRAME_CROSS_ORIGIN ---
+
+func TestPhaseE_HiddenIframe_SuppressedByBrandgraphTrust(t *testing.T) {
+	r := Apply(base(Inputs{
+		TrustedAnyScope: true,
+		Context: ContextOutput{
+			HasCrossOriginIframe: true,
+		},
+	}))
+	if r.Verdict == Warn {
+		t.Errorf("brandgraph-trusted host should suppress HIDDEN_IFRAME_CROSS_ORIGIN; got %s", r.Verdict)
+	}
+}
+
+// --- SUSPICIOUS_DOWNLOAD_OFFERED (non-sensitive path) ---
+
+func TestPhaseE_SuspiciousDownload_SuppressedByTrustScore(t *testing.T) {
+	r := Apply(base(Inputs{
+		TrustScore: 0.80,
+		PageClass:  pageclass.Generic,
+		Context: ContextOutput{
+			RiskyDownloadCount: 3,
+		},
+	}))
+	if r.Verdict == Warn || r.Verdict == Block {
+		t.Errorf("trusted-score host: SUSPICIOUS_DOWNLOAD_OFFERED should not promote; got %s", r.Verdict)
+	}
+}
+
+// --- RANDOM_HOSTNAME (non-sensitive Warn path) ---
+
+func TestPhaseE_RandomHostname_NonSensitive_SuppressedByTrustScore(t *testing.T) {
+	r := Apply(base(Inputs{
+		TrustScore: 0.80,
+		PageClass:  pageclass.Generic,
+		Context: ContextOutput{
+			SuspiciousHostnameSignals: true,
+			SuspiciousHostnameDetail:  "DGA classifier fired",
+		},
+	}))
+	if r.Verdict == Warn {
+		t.Errorf("trusted-score host should suppress RANDOM_HOSTNAME; got %s", r.Verdict)
+	}
+	if has(r.ReasonCodes, reasons.RandomHostname) {
+		t.Errorf("RANDOM_HOSTNAME should not emit under high trust")
+	}
+}
+
+// --- DNS_DIVERGENCE_SOFT ---
+
+func TestPhaseE_DNSDivergenceSoft_AloneIsSubThreshold(t *testing.T) {
+	// Half-weight on its own — DNS divergence ALONE must not promote
+	// ALLOW → WARN, otherwise every multi-CDN site would WARN.
+	r := Apply(base(Inputs{
+		Context: ContextOutput{
+			ResolverDivergence:       true,
+			ResolverDivergenceDetail: "browser hit 203.0.113.5, resolver saw 198.51.100.4",
+		},
+	}))
+	if r.Verdict != Allow {
+		t.Errorf("DNS divergence alone (half-weight) should NOT promote to WARN; got %s", r.Verdict)
+	}
+	// Reason code is still emitted for transparency:
+	if !has(r.ReasonCodes, reasons.DNSDivergenceSoft) {
+		t.Errorf("DNS_DIVERGENCE_SOFT code should appear in reasons even below threshold")
+	}
+}
+
+func TestPhaseE_DNSDivergenceSoft_PlusOneOtherSoft_Warns(t *testing.T) {
+	// DNS divergence (0.5) + hidden iframe (1.0) = 1.5 ≥ 1.0 → WARN.
+	r := Apply(base(Inputs{
+		Context: ContextOutput{
+			ResolverDivergence:   true,
+			HasCrossOriginIframe: true,
+		},
+	}))
+	if r.Verdict != Warn {
+		t.Errorf("DNS divergence + hidden iframe should WARN; got %s", r.Verdict)
+	}
+	if !has(r.ReasonCodes, reasons.DNSDivergenceSoft) {
+		t.Errorf("expected DNS_DIVERGENCE_SOFT")
+	}
+	if !has(r.ReasonCodes, reasons.HiddenIframeCrossOrigin) {
+		t.Errorf("expected HIDDEN_IFRAME_CROSS_ORIGIN")
+	}
+}
+
+func TestPhaseE_DNSDivergenceSoft_SuppressedByTrustScore(t *testing.T) {
+	r := Apply(base(Inputs{
+		TrustScore: 0.80,
+		Context: ContextOutput{
+			ResolverDivergence:   true,
+			HasCrossOriginIframe: true,
+		},
+	}))
+	if r.Verdict == Warn {
+		t.Errorf("trust score 0.80 should suppress both soft signals; got %s", r.Verdict)
+	}
+}
+
+// --- Hard rules must NOT be suppressed by trust score (regression) ---
+
+func TestPhaseE_HardRule_PublicDomainPrivateIP_IgnoresTrustScore(t *testing.T) {
+	// Compromised trusted brand pointed at a private IP must still BLOCK.
+	r := Apply(base(Inputs{
+		Domain:          "google.com",
+		TrustedIdentity: true,
+		TrustedAnyScope: true,
+		TrustScore:      1.0,
+		Context: ContextOutput{
+			BrowserRemoteIP:          "10.0.0.5",
+			BrowserRemoteIPIsPrivate: true,
+		},
+	}))
+	if r.Verdict != Block {
+		t.Errorf("PUBLIC_DOMAIN_PRIVATE_IP must BLOCK even on trust=1.0; got %s", r.Verdict)
+	}
+	if !has(r.ReasonCodes, reasons.PublicDomainPrivateIP) {
+		t.Errorf("expected PUBLIC_DOMAIN_PRIVATE_IP reason code")
+	}
+}
+
+// --- Confidence scales with corroboration ---
+
+func TestPhaseE_TwoSoftSignals_HigherConfidenceThanOne(t *testing.T) {
+	one := Apply(base(Inputs{
+		Context: ContextOutput{HasCrossOriginIframe: true},
+	}))
+	two := Apply(base(Inputs{
+		Context: ContextOutput{
+			HasCrossOriginIframe:  true,
+			HiddenSuspiciousCount: 8,
+		},
+	}))
+	if one.Verdict != Warn || two.Verdict != Warn {
+		t.Fatalf("both should WARN; got one=%s two=%s", one.Verdict, two.Verdict)
+	}
+	if !(two.Confidence > one.Confidence) {
+		t.Errorf("two corroborating soft signals should report higher confidence than one (one=%.2f, two=%.2f)", one.Confidence, two.Confidence)
+	}
+}

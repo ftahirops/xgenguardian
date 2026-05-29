@@ -123,6 +123,13 @@ const (
 	TLSIdentityMismatch           Code = "TLS_IDENTITY_MISMATCH"
 	ExpectedResolverBypassed      Code = "EXPECTED_RESOLVER_BYPASSED"
 	LocalResolverHijackSuspected  Code = "LOCAL_RESOLVER_HIJACK_SUSPECTED"
+
+	// Phase E — soft DNS divergence. The browser's observed connection IP
+	// for this domain disagrees with the resolver ledger's answer set, but
+	// the IP is publicly routable (not the hard PUBLIC_DOMAIN_PRIVATE_IP
+	// case). Common on multi-CDN sites and split-horizon DNS, so this is
+	// advisory/scored — suppressed on highly-trusted hosts.
+	DNSDivergenceSoft             Code = "DNS_DIVERGENCE_SOFT"
 )
 
 // Template is the human-readable form rendered in interstitials and the portal.
@@ -476,6 +483,11 @@ var templates = map[Code]Template{
 		Title:    "Hidden cross-origin iframe",
 		Body:     "This page embeds a hidden iframe from a different origin. Hidden cross-origin iframes are used to silently load malicious content, exfiltrate data, or stage credential theft.",
 		Severity: SeverityMedium,
+	},
+	DNSDivergenceSoft: {
+		Title:    "DNS answers disagree across paths",
+		Body:     "The IP the browser connected to does not match the answer set our protective resolver saw for this domain. On most sites this is harmless multi-CDN behaviour, but on an untrusted, unknown host it can indicate split-resolver tampering.",
+		Severity: SeverityLow,
 	},
 	OverlayClickjack: {
 		Title:    "Clickjacking overlay detected",
