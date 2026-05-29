@@ -454,7 +454,18 @@ func (s *Server) runPipelineWithTier(ctx context.Context, req checkRequest, tier
 			legacyDecision(req, in, out, render, feedSources, oauthDec)
 	} else {
 		policyIn := buildPolicyInputs(req, in, out, render, feedSources, feedHit, oauthDec, vendorDNS)
-		policyOut := policy.Apply(policyIn)
+		// Phase F: when XGG_SHADOW_ENABLED=1, run the configured candidate
+		// engine in parallel and emit a diff metric + log line. The
+		// production verdict is always what we return to the user; the
+		// candidate's output never leaks. Default-off → zero overhead.
+		var policyOut policy.Result
+		if cand := shadowCandidate(); cand != nil {
+			out, diff := policy.RunShadow(policyIn, cand)
+			policyOut = out
+			recordShadowDiff(policyIn.Domain, diff)
+		} else {
+			policyOut = policy.Apply(policyIn)
+		}
 		finalVerdict = string(policyOut.Verdict)
 		codes = policyOut.ReasonCodes
 		blockReason = policyOut.BlockReason

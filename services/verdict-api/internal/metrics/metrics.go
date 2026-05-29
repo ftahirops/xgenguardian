@@ -118,6 +118,34 @@ var (
 		},
 		[]string{"code"},
 	)
+
+	// ShadowDiffTotal — Phase F. Counts shadow-engine outcomes by kind:
+	//   "clean"            — candidate matched production exactly
+	//   "verdict_changed"  — verdict flipped
+	//   "reasons_added"    — same verdict, candidate added reason codes
+	//   "reasons_removed"  — same verdict, candidate dropped reason codes
+	// A weekly review of verdict_changed + reasons_added is the gate to
+	// promote a candidate engine to production.
+	ShadowDiffTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "xgg_shadow_diff_total",
+			Help: "Shadow-engine diff outcomes by kind (clean/verdict_changed/reasons_added/reasons_removed).",
+		},
+		[]string{"kind"},
+	)
+
+	// ShadowLatency — Phase F. Per-engine wall-clock for shadow runs.
+	// Label engine ∈ {"production","candidate"}. Used to budget the
+	// candidate before promotion (must not exceed production p99 by
+	// more than a small margin).
+	ShadowLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "xgg_shadow_engine_latency_seconds",
+			Help:    "Per-engine policy.Apply wall-clock during shadow runs.",
+			Buckets: []float64{0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1},
+		},
+		[]string{"engine"},
+	)
 )
 
 // MustRegister registers all verdict-api metrics with the given registerer.
@@ -136,5 +164,7 @@ func MustRegister(r prometheus.Registerer) {
 		SandboxFailuresTotal,
 		RedisErrorsTotal,
 		RuleFiredTotal,
+		ShadowDiffTotal,
+		ShadowLatency,
 	)
 }
