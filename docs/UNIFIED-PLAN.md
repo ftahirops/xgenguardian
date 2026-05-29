@@ -1,9 +1,20 @@
-# XGenGuardian — Unified Plan (Final)
+# XGenGuardian — Unified Plan (Legacy Stabilization Plan)
+
+> **Status:** legacy/superseded for active engine planning.
+>
+> This file remains useful historical context for the 2026-05 stabilization
+> work, but it is no longer the top-level execution authority. For current
+> engine roadmap and rollout discipline, use
+> [`final-engine-architecture-plan.md`](final-engine-architecture-plan.md).
+> For per-URL deep analysis design, use
+> [`deeptrust-zero-trust-url-analysis.md`](deeptrust-zero-trust-url-analysis.md).
+> For release gates, use
+> [`maturity-testing-blueprint.md`](maturity-testing-blueprint.md).
 
 Single source of truth that supersedes the R&D specs at `/home/xgendns-phish-scam-protector/` and slots them into the current code. Where the spec and code disagreed, this document picks one answer.
 
 Date: 2026-05-26
-Status: authoritative — open issues in `docs/issues/ISSUES.md` if you disagree before implementing.
+Status: legacy reference — open issues in `docs/issues/ISSUES.md` if a current canonical document conflicts with code or tests.
 
 ---
 
@@ -664,7 +675,7 @@ Until these ship, the product is "very good, with known holes" — not rock-soli
 
 ## 18. Open-source tooling — build vs. integrate
 
-We are not the first people to scan a malicious web page. Most of our planned "build" items have mature OSS that we should integrate rather than rebuild. This section is the build-vs-buy register; it is authoritative — overriding individual section text — for any decision about adding a new detection capability.
+We are not the first people to scan a malicious web page. Most of our planned "build" items have mature OSS that we should integrate rather than rebuild. This section is a historical build-vs-buy register. For current decisions, prefer the scoped canonical documents listed at the top of this file.
 
 ### 18.1 Already in our stack
 | Tool | Where | Notes |

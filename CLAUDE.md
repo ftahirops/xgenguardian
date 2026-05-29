@@ -4,7 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-**XGenGuardian** — brain-first protective DNS aimed at catching zero-day phishing that blocklists miss, with per-URL transparency. The canonical reference is [`docs/architecture.md`](docs/architecture.md); planning and active work live under `docs/` (`tasks/TASKS.md`, `bugs/BUGS.md`, `issues/ISSUES.md`, `phases/`, `progress/`).
+**XGenGuardian** — brain-first protective DNS aimed at catching zero-day phishing that blocklists miss, with per-URL transparency.
+
+Canonical references are scoped:
+- [`docs/architecture.md`](docs/architecture.md) — historical full-system L0-L6 architecture/reference.
+- [`docs/final-engine-architecture-plan.md`](docs/final-engine-architecture-plan.md) — current verdict-engine roadmap and rollout discipline.
+- [`docs/deeptrust-zero-trust-url-analysis.md`](docs/deeptrust-zero-trust-url-analysis.md) — current per-URL deep/zero-trust investigation design.
+- [`docs/maturity-testing-blueprint.md`](docs/maturity-testing-blueprint.md) — release gates and maturity tests.
+
+Planning and active work live under `docs/` (`tasks/TASKS.md`, `bugs/BUGS.md`, `issues/ISSUES.md`, `phases/`, `progress/`).
 
 ## Common commands
 

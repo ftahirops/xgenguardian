@@ -9,6 +9,7 @@ docs/
 ├── README.md               ← you are here
 ├── advanced-detection-cases.md ← hard phishing, scam, OAuth, raw-IP, and edge-case examples
 ├── blueprint-architecture.md ← GitHub-facing system blueprint and differentiation
+├── deeptrust-zero-trust-url-analysis.md ← deep per-URL zero-trust investigation engine design
 ├── final-engine-architecture-plan.md ← final mature DNS/action/trust/risk engine target
 ├── maturity-testing-blueprint.md ← exhaustive testing, chaos, FP/FN, and release gates
 ├── architecture.md         ← full architecture, threat model, features, plan
@@ -32,6 +33,31 @@ docs/
 └── api/                    ← API references
 ```
 
+## Canonical Document Scopes
+
+The architecture docs have different scopes. Do not treat every old planning
+file as equally authoritative.
+
+| File | Canonical For | Status |
+|---|---|---|
+| [architecture.md](architecture.md) | historical full-system threat model and original L0-L6 reference | legacy reference; not the current execution plan |
+| [final-engine-architecture-plan.md](final-engine-architecture-plan.md) | current mature verdict-engine roadmap and rollout discipline | current canonical engine roadmap |
+| [deeptrust-zero-trust-url-analysis.md](deeptrust-zero-trust-url-analysis.md) | per-URL deep investigation / zero-trust analysis design | current canonical deep-analysis spec |
+| [maturity-testing-blueprint.md](maturity-testing-blueprint.md) | release gates, test matrices, chaos, privacy, accessibility | current canonical quality gate |
+| [real-user-acceptance-test-plan.md](real-user-acceptance-test-plan.md) | human browser testing / RUAT | current canonical RUAT protocol |
+| [UNIFIED-PLAN.md](UNIFIED-PLAN.md) | older stabilization plan and historical decisions | legacy/superseded where it conflicts with current docs |
+
+When documents conflict, use this order:
+
+```text
+code + tests
+CLAUDE.md engineering policy
+final-engine-architecture-plan.md
+deeptrust-zero-trust-url-analysis.md
+maturity-testing-blueprint.md
+architecture.md / UNIFIED-PLAN.md as historical context
+```
+
 ## Rules
 
 1. **Every commit that changes scope** updates the relevant file in `phases/` or `tasks/`.
@@ -39,11 +65,12 @@ docs/
 3. **Bugs go in `bugs/BUGS.md` immediately** when discovered, even before triage.
 4. **Weekly progress** is appended to `progress/PROGRESS.md` every Friday.
 5. **Open decisions** that aren't tasks (architecture choices, vendor selection, etc.) live in `issues/ISSUES.md`.
-6. **Architecture rationale** stays in `architecture.md`; this file is canonical.
+6. **Architecture rationale** must state its scope. Do not introduce a new architecture doc without adding it to the Canonical Document Scopes table above.
 
 ## Quick Links
 
 - [Advanced Detection Cases](advanced-detection-cases.md)
+- [DeepTrust Zero-Trust URL Analysis](deeptrust-zero-trust-url-analysis.md)
 - [Blueprint Architecture](blueprint-architecture.md)
 - [Final Engine Architecture Plan](final-engine-architecture-plan.md)
 - [Maturity Testing Blueprint](maturity-testing-blueprint.md)
