@@ -607,9 +607,87 @@ async function applyVerdict(tabId, target, verdict, opener) {
     await chrome.tabs.update(tabId, { url: target });
     return;
   }
+  // v0.3.3 — stash the full verdict in session storage keyed by target
+  // URL so the warn/blocked/isolate page can pull the decision_trace +
+  // reason codes + clearance checks for rendering. URL-param transport
+  // can't carry the trace (length + nested structure), so this is the
+  // wire between background.js and the interstitial pages.
+  await stashVerdictForPage(target, verdict);
   await chrome.tabs.update(tabId, {
     url: interstitialURL(page, target, verdict, opener),
   });
+}
+
+// ---------- v0.3.3: verdict stash for interstitial pages ----------
+
+// Cap how many verdicts we keep in session memory. Service-worker
+// session storage is per-window-session; we only need the most recent
+// few to back the visible warn/blocked tabs.
+const VERDICT_STASH_LIMIT = 50;
+const VERDICT_STASH_KEY = "verdictStash";
+
+async function stashVerdictForPage(url, verdict) {
+  try {
+    const slim = {
+      verdict: verdict.verdict,
+      confidence: verdict.confidence,
+      grade: verdict.grade,
+      page_class: verdict.page_class,
+      reason_codes: verdict.reason_codes || [],
+      block_reason: verdict.block_reason || "",
+      trust_score: verdict.trust_score || 0,
+      trust_contributors: verdict.trust_contributors || [],
+      clearance_checks: verdict.clearance_checks || {},
+      decision_trace: verdict.decision_trace || [],
+      evidence_id: verdict.evidence_id || "",
+      scanned_at: verdict.scanned_at || new Date().toISOString(),
+    };
+    const cur = (await chrome.storage.session.get({ [VERDICT_STASH_KEY]: {} }))[VERDICT_STASH_KEY] || {};
+    cur[url] = slim;
+    // FIFO trim — drop oldest by scanned_at when over the cap.
+    const keys = Object.keys(cur);
+    if (keys.length > VERDICT_STASH_LIMIT) {
+      keys.sort((a, b) => (cur[a].scanned_at || "").localeCompare(cur[b].scanned_at || ""));
+      for (let i = 0; i < keys.length - VERDICT_STASH_LIMIT; i++) delete cur[keys[i]];
+    }
+    await chrome.storage.session.set({ [VERDICT_STASH_KEY]: cur });
+  } catch (e) {
+    // session storage is best-effort — fail silent so a stash failure
+    // never breaks the user-visible navigation flow.
+  }
+}
+
+// ---------- v0.3.3: telemetry overrides → /v1/telemetry/override ----------
+
+// Posts to /v1/telemetry/override. Fire-and-forget; the server returns
+// 204 either way (opt-in is enforced server-side). We never block the
+// user-visible action on the network call — telemetry is best-effort.
+async function postTelemetryOverride(action, payload) {
+  try {
+    const cfg = await settings();
+    if (cfg.telemetry === false) return;        // user opted out
+    const apiBase = validateAPIBase(cfg.apiBase);
+    if (!apiBase) return;
+    const body = {
+      url: typeof payload.url === "string" ? payload.url : "",
+      verdict: typeof payload.verdict === "string" ? payload.verdict : "",
+      reason_codes: Array.isArray(payload.reason_codes) ? payload.reason_codes : [],
+      action,
+      source: "extension",
+      client_id: cfg.clientId || "",
+    };
+    if (typeof payload.note === "string" && payload.note) body.note = payload.note;
+    await fetch(`${apiBase}/v1/telemetry/override`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      // keepalive lets the POST survive even when the page is unloading
+      // (override_warn click → location.href = target → page tears down).
+      keepalive: true,
+    });
+  } catch {
+    // network failures are fine — server has nothing to act on.
+  }
 }
 
 // ---------- top-level navigation hook ----------
@@ -908,6 +986,43 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // copy-guard.js telemetry — fire-and-forget aggregate.
   if (msg?.type === "copy-telemetry") {
     try { incrementCopyCounter(msg); } catch (_) { /* ignore */ }
+    sendResponse({ ok: true });
+    return false;
+  }
+  // v0.3.3 Phase G — user clicked "Proceed anyway" on the WARN page.
+  if (msg?.kind === "warn_overridden") {
+    if (isHttpURL(msg.url)) {
+      postTelemetryOverride("override_warn", {
+        url: msg.url,
+        verdict: "WARN",
+        reason_codes: Array.isArray(msg.codes) ? msg.codes : [],
+      });
+    }
+    sendResponse({ ok: true });
+    return false;
+  }
+  // v0.3.3 Phase G — user clicked "Proceed anyway" on the BLOCK page.
+  if (msg?.kind === "block_overridden") {
+    if (isHttpURL(msg.url)) {
+      postTelemetryOverride("override_block", {
+        url: msg.url,
+        verdict: "BLOCK",
+        reason_codes: Array.isArray(msg.codes) ? msg.codes : [],
+      });
+    }
+    sendResponse({ ok: true });
+    return false;
+  }
+  // v0.3.3 Phase G — user flagged a verdict as wrong from any interstitial.
+  if (msg?.kind === "report_fp") {
+    if (isHttpURL(msg.url)) {
+      postTelemetryOverride("report_fp", {
+        url: msg.url,
+        verdict: msg.verdict || "",
+        reason_codes: Array.isArray(msg.codes) ? msg.codes : [],
+        note: msg.note || "",
+      });
+    }
     sendResponse({ ok: true });
     return false;
   }

@@ -124,6 +124,36 @@ const score      = p.get("s") || "";
 const codesCSV   = p.get("c") || "";
 const verdict    = (p.get("v") || "BLOCK").toUpperCase();
 
+// v0.3.3 — pull the full verdict (with decision_trace) from session
+// storage. Fail silent if absent (page opened directly).
+(async () => {
+  try {
+    const all = await chrome.storage.session.get({ verdictStash: {} });
+    const stashed = all?.verdictStash?.[url];
+    if (stashed?.decision_trace?.length) {
+      const wrap = document.getElementById("decisionTrace");
+      const body = document.getElementById("decisionTraceBody");
+      if (!wrap || !body) return;
+      wrap.hidden = false;
+      while (body.firstChild) body.removeChild(body.firstChild);
+      for (const s of stashed.decision_trace) {
+        const stage = String(s.stage || "");
+        const outcome = String(s.outcome || "");
+        const code = String(s.code || "");
+        const detail = String(s.detail || "");
+        const weight = typeof s.weight === "number" && s.weight !== 0 ? s.weight.toFixed(2) : "";
+        const row = el("div", { className: "trace-row trace-" + outcome });
+        row.appendChild(el("span", { className: "trace-stage", text: stage || "·" }));
+        row.appendChild(el("span", { className: "trace-outcome", text: outcome || "·" }));
+        row.appendChild(el("span", { className: "trace-code", text: code || "—" }));
+        row.appendChild(el("span", { className: "trace-detail", text: detail || "" }));
+        if (weight) row.appendChild(el("span", { className: "trace-weight", text: "w=" + weight }));
+        body.appendChild(row);
+      }
+    }
+  } catch {}
+})();
+
 // Verdict pill + heading copy
 const pill = document.getElementById("verdictPill");
 if (verdict === "WARN") {

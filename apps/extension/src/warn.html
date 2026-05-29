@@ -109,6 +109,26 @@
     .loading { color: #6f7787; font-size: 13px; padding: 16px 0; }
     .empty   { color: #6f7787; font-size: 13px; padding: 8px 0; font-style: italic; }
     .footer-meta { margin-top: 40px; color: #6f7787; font-size: 12px; }
+
+    /* v0.3.3 — decision trace */
+    .trace-wrap { margin-top: 32px; }
+    .trace-table { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: #11141d; border: 1px solid #1c2230; border-radius: 8px; padding: 8px; }
+    .trace-row { display: grid; grid-template-columns: 64px 96px 220px 1fr auto; gap: 10px; padding: 4px 8px; border-radius: 4px; }
+    .trace-row + .trace-row { border-top: 1px solid #161b25; }
+    .trace-stage { color: #6ea7ff; }
+    .trace-outcome { font-weight: 600; }
+    .trace-code { color: #cfd4dd; }
+    .trace-detail { color: #98a0b0; }
+    .trace-weight { color: #6f7787; }
+    .trace-fired      .trace-outcome { color: #ff8c8c; }
+    .trace-fail       .trace-outcome { color: #ff8c8c; }
+    .trace-suppressed .trace-outcome { color: #ffc56b; }
+    .trace-skip       .trace-outcome { color: #6f7787; }
+    .trace-pass       .trace-outcome { color: #7cd28a; }
+    .trace-ALLOW      .trace-outcome { color: #7cd28a; }
+    .trace-WARN       .trace-outcome { color: #ffc56b; }
+    .trace-BLOCK      .trace-outcome { color: #ff8c8c; }
+    .trace-ISOLATE    .trace-outcome { color: #c990ff; }
   </style>
 </head>
 <body>
@@ -169,6 +189,12 @@
         <div class="label">Security DNS providers</div>
         <div class="value" id="vendorDNS"></div>
       </div>
+    </div>
+
+    <div class="trace-wrap" id="decisionTrace" hidden>
+      <h2>Decision trace</h2>
+      <p style="color:#9aa3b2;font-size:13px;margin:6px 0 12px 0;">Every rule the engine evaluated for this URL, in order. Use this to verify the verdict.</p>
+      <div class="trace-table" id="decisionTraceBody"></div>
     </div>
 
     <div class="actions">

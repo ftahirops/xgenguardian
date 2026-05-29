@@ -78,6 +78,43 @@ if (brand) {
 renderSignals(initialCodes);
 renderChecklistFromCodes(initialCodes, null);
 
+// v0.3.3 — pull the full verdict (with decision_trace) from session
+// storage if the background stashed one for this URL. Falls back
+// silently if absent (page opened directly, or storage was cleared).
+loadStashedVerdict(rawU).then((stashed) => {
+  if (stashed?.decision_trace?.length) renderDecisionTrace(stashed.decision_trace);
+}).catch(() => {});
+
+async function loadStashedVerdict(target) {
+  try {
+    const all = await chrome.storage.session.get({ verdictStash: {} });
+    return all?.verdictStash?.[target] || null;
+  } catch { return null; }
+}
+
+function renderDecisionTrace(steps) {
+  const wrap = document.getElementById("decisionTrace");
+  if (!wrap) return;
+  wrap.hidden = false;
+  const body = document.getElementById("decisionTraceBody");
+  if (!body) return;
+  clearChildren(body);
+  for (const s of steps) {
+    const stage = String(s.stage || "");
+    const outcome = String(s.outcome || "");
+    const code = String(s.code || "");
+    const detail = String(s.detail || "");
+    const weight = typeof s.weight === "number" && s.weight !== 0 ? s.weight.toFixed(2) : "";
+    const row = el("div", { className: "trace-row trace-" + outcome });
+    row.appendChild(el("span", { className: "trace-stage", text: stage || "·" }));
+    row.appendChild(el("span", { className: "trace-outcome", text: outcome || "·" }));
+    row.appendChild(el("span", { className: "trace-code", text: code || "—" }));
+    row.appendChild(el("span", { className: "trace-detail", text: detail || "" }));
+    if (weight) row.appendChild(el("span", { className: "trace-weight", text: "w=" + weight }));
+    body.appendChild(row);
+  }
+}
+
 if (evidenceId) {
   fetchAndRender(evidenceId).catch((e) => {
     console.warn("warn: evidence fetch failed", e);
