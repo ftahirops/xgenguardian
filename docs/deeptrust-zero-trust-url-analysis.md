@@ -1,15 +1,24 @@
 # XGenGuardian DeepTrust Zero-Trust URL Analysis Engine
 
-**Status:** canonical for per-URL deep investigation design; not the global
-architecture roadmap.
+**Status:** canonical final strategy for per-URL DeepTrust investigation; not
+the global architecture roadmap.
+
+**Strategy version:** DeepTrust v2 / final mature-engine target.
 
 **Owner:** XGenGuardian detection-engine maintainers.
 
 **Last reviewed:** 2026-05-29.
 
+**Review cadence:** quarterly, plus immediate review after any P0 false
+negative, systemic false-positive class, or major browser/API change.
+
 **Implementation state:** working target spec. Current implementation status is
 tracked in §1.1. Cross-engine rollout remains governed by
 [`final-engine-architecture-plan.md`](final-engine-architecture-plan.md).
+
+**Precedence:** if this document conflicts with older architectural notes about
+per-URL analysis, this document wins. Code and tests remain the final proof of
+what is actually shipped.
 
 This document defines the long-form target design for analyzing one URL or
 domain as deeply as possible. The purpose is to move XGenGuardian beyond
@@ -42,6 +51,58 @@ Canonical companion documents:
 - [`final-engine-architecture-plan.md`](final-engine-architecture-plan.md) is the broader engine architecture and rollout plan.
 - [`maturity-testing-blueprint.md`](maturity-testing-blueprint.md) defines release gates, chaos tests, privacy, and corpus rules.
 - [`real-user-acceptance-test-plan.md`](real-user-acceptance-test-plan.md) defines human browser acceptance testing.
+
+## 0. Final Engineering Verdict
+
+The mature XGenGuardian engine is not a domain list, a DNS blocklist, a visual
+matcher, or a sandbox by itself. It is an evidence-fusion system:
+
+```text
+one URL
+one canonical evidence object
+many bounded detectors
+one decision kernel
+one evidence report
+one feedback loop
+```
+
+Final design stance:
+
+```text
+DNS is line one, never the only line.
+The browser's actual connection identity is mandatory evidence.
+Big-company domains are not automatically safe.
+CDN variance is normal and must be modeled, not guessed.
+Hard malicious evidence always wins.
+Soft suspicious evidence must compose, not short-circuit randomly.
+Trust can suppress weak soft signals, never hard evidence.
+Sensitive actions require stronger proof than read-only pages.
+Manual deep scan may be slow; live browsing may not hang.
+Every wrong verdict becomes corpus, test, and rule-health data.
+```
+
+This is the design that stops the trust-registry stuffing pattern. A reported
+false positive must not be fixed by adding the host to a global allowlist unless
+the host belongs to the small global identity/payment/government tier where all
+users benefit. Ordinary false positives go through corpus + structural fix.
+
+## 0.1 Security Standards This Strategy Follows
+
+DeepTrust is aligned to these external engineering principles:
+
+| Source | Principle Applied Here |
+|---|---|
+| CISA Secure by Design | XGenGuardian owns customer security outcomes; safety is measured, not pushed onto the user. |
+| NIST CSF 2.0 | Govern/identify/protect/detect/respond/recover maps to policy governance, source inventory, protective verdicts, telemetry, triage, and corpus recovery. |
+| OWASP ASVS | Security controls require repeatable verification, not developer claims. |
+| MITRE ATT&CK phishing techniques | Detectors map to real attacker techniques such as spearphishing links, malicious attachments/downloads, credential theft, and social-engineering flows. |
+
+References:
+
+- CISA Secure by Design: <https://www.cisa.gov/securebydesign>
+- NIST CSF 2.0: <https://www.nist.gov/cyberframework>
+- OWASP ASVS: <https://owasp.org/www-project-application-security-verification-standard/>
+- MITRE ATT&CK Spearphishing Link: <https://attack.mitre.org/techniques/T1598/003/>
 
 ## 1. Objective
 
@@ -219,7 +280,8 @@ source and analysis step belongs to one of four execution tiers.
 | T0 cached/local | 5-50ms | every navigation | session cache, local verdict cache, user allowlist, trusted wrapper bypass | invisible |
 | T1 fast online | 50-500ms | every uncached navigation | local feeds, vendor DNS cache, URL shape, raw IP, trustscore from cached features | brief hold acceptable |
 | T2 conditional online | 500ms-3s | suspicious/unknown/sensitive only | RDAP cache miss, redirect unwrap, source fanout, ASN/CDN lookup | holding page with progress |
-| T3 deep analysis | 8-45s, hard cap 90s | sensitive unknown, manual scan, Ultra, suspicious | sandbox render, visual match, OCR/QR, download probe | isolate/manual choice if not ready |
+| T3 live deep analysis | 8-45s, hard cap 90s | sensitive unknown, Ultra, suspicious live browsing | sandbox render, visual match, OCR/QR, download probe | isolate/manual choice if not ready |
+| T4 exhaustive investigation | 2-30 minutes, operator cap | manual "deep scan", analyst queue, high-risk report | multi-region DNS, recursive crawl graph, paid source fanout, detonation, OCR/QR recursion, archive unpacking, repeated render passes | asynchronous report; not used to hold live browsing |
 
 Release SLOs:
 
@@ -242,6 +304,247 @@ manual deep-scan may be slower and more expensive than live browsing
 
 This is mandatory. A comprehensive engine that users disable because it adds
 30 seconds to normal browsing is a failed engine.
+
+## 3.2 Final Mature Architecture
+
+The mature engine is organized as a pipeline of pure evidence producers feeding
+one policy decision kernel.
+
+```text
+request
+  -> normalizer
+  -> wrapper/redirect expander
+  -> DNS and resolver-ledger collector
+  -> browser connection-identity collector
+  -> reputation source aggregator
+  -> domain/infrastructure history collector
+  -> sandbox/render collector
+  -> page graph builder
+  -> visual/OCR/QR analyzer
+  -> action/sink classifier
+  -> DeepTrustEvidence object
+  -> hard-evidence gate
+  -> trust/risk/action scorer
+  -> mode policy matrix
+  -> verdict + evidence report + telemetry
+```
+
+Engineering rule:
+
+```text
+detectors emit evidence, not final verdicts
+the decision kernel emits the verdict
+```
+
+Exceptions are hard-evidence modules. A detector may mark evidence as
+`hard_block_eligible`, but the central hard-evidence gate still performs the
+final short-circuit. This keeps the system explainable and prevents scattered
+rules from mutating verdicts independently.
+
+## 3.3 Canonical Evidence Object
+
+Every analysis path writes into one versioned object. This object is the
+contract between detectors, policy, UI, tests, telemetry, and future ML.
+
+```text
+DeepTrustEvidence v1
+  request:
+    original_url
+    normalized_url
+    registrable_domain
+    user_mode
+    client_id_hash
+
+  unwrap:
+    wrapper_chain[]
+    redirect_chain[]
+    final_url
+
+  dns:
+    xgg_resolver_answers[]
+    public_resolver_answers[]
+    authoritative_ns
+    cname_chain
+    ttl_profile
+    dnssec_state
+    nxdomain_or_failure
+
+  connection_identity:
+    browser_remote_ip
+    browser_remote_asn
+    browser_tls_cert
+    sni
+    http_host
+    resolver_ledger_match
+    authorized_cdn_or_asn_match
+    private_ip_for_public_domain
+
+  reputation:
+    source_results[]
+    feed_hits[]
+    vendor_dns_results[]
+    source_disagreements[]
+
+  domain_history:
+    rdap_age
+    registrar
+    nameserver_age
+    ct_log_history
+    cert_issuer_history
+    asn_history
+    hosting_reputation
+
+  page_graph:
+    nodes[]
+    edges[]
+    forms[]
+    scripts[]
+    iframes[]
+    downloads[]
+    network_requests[]
+    extracted_urls[]
+
+  content:
+    dom_summary
+    visible_text
+    ocr_text
+    qr_urls[]
+    phone_numbers[]
+    wallets[]
+    gift_card_phrases[]
+    remote_tool_mentions[]
+
+  visual:
+    brand_matches[]
+    favicon_matches[]
+    screenshot_hashes[]
+    logo_regions[]
+
+  action:
+    class
+    sensitivity
+    required_proof[]
+    observed_sinks[]
+    missing_proof[]
+
+  scoring:
+    trust_score
+    trust_contributors[]
+    risk_score
+    risk_contributors[]
+    hard_evidence[]
+    suppressed_soft_evidence[]
+
+  policy:
+    verdict
+    confidence
+    reason_codes[]
+    decision_trace[]
+    latency_tier
+    source_cost
+```
+
+Versioning rule:
+
+```text
+fields may be added with defaults
+fields may not become required without a schema version bump
+policy must tolerate absent fields from older producers
+```
+
+## 3.4 Decision Kernel Contract
+
+The final decision kernel is the only place where `ALLOW`, `WARN`, `ISOLATE`,
+or `BLOCK` is chosen.
+
+```text
+1. Hard evidence gate
+2. Sensitive-action proof gate
+3. Trust/risk/action score gate
+4. Mode threshold gate
+5. Evidence/report generation
+```
+
+Hard evidence examples:
+
+```text
+public-domain-to-private-IP
+browser connected to unauthorized IP with TLS identity failure
+high-confidence feed hit
+confirmed credential exfiltration
+malicious command
+known malware hash/YARA
+raw IP serving botnet binary
+confirmed drive-by download
+```
+
+Soft evidence examples:
+
+```text
+random hostname
+fresh domain
+DNS divergence on CDN-like host
+hidden iframe
+hidden anchors
+obfuscated JavaScript
+suspicious download text
+weak visual brand match
+low-confidence external source hit
+```
+
+Trust evidence examples:
+
+```text
+old stable domain
+clean high-confidence feeds
+valid TLS identity
+known organization graph
+known scoped CDN/payment/OAuth relation
+stable ASN/cert/nameserver history
+authorized CDN edge match
+```
+
+Trust suppression rule:
+
+```text
+trust may suppress weak soft evidence
+trust may reduce WARN to ALLOW on read-only pages
+trust may not suppress hard evidence
+trust may not clear sensitive-action proof failures
+```
+
+This is the central anti-false-positive design: benign sites stop being harmed
+by weak signals, while real attacks still block when evidence is strong.
+
+## 3.5 Live Scan vs Exhaustive Scan
+
+XGenGuardian has two product modes with different promises.
+
+| Mode | Goal | Time Budget | Output |
+|---|---|---:|---|
+| Live browser protection | protect the user without breaking browsing | 0-12s before choice UI | verdict + concise evidence |
+| Exhaustive DeepTrust investigation | dissect one URL from every angle | minutes, operator-configured | full dossier + graph + source matrix + artifacts |
+
+Exhaustive scan may do things live browsing must not do:
+
+```text
+multi-region DNS resolution
+repeated render passes over time
+full link graph crawl with depth limit
+OCR/QR recursive URL extraction
+archive unpacking
+download detonation in isolated network namespace
+paid reputation fanout
+TLS/CT historical analysis
+ASN/hosting reputation expansion
+similar-domain search
+campaign clustering
+LLM-assisted scam-language classification over sanitized text
+manual analyst review queue
+```
+
+Exhaustive scan must be asynchronous. It can keep improving a report after the
+initial verdict, but it must not hold a browser tab hostage.
 
 ## 4. Step 1: Normalize And Unwrap
 
@@ -320,6 +623,43 @@ XGG resolver must also store what it returned:
 
 This returned-IP ledger is required for local DNS-poisoning detection.
 
+Resolver strategy:
+
+```text
+browser may use any resolver
+XGG still runs its own resolver path
+XGG stores what its resolver returned per client/domain/TTL
+extension reports what the browser actually connected to
+policy compares both paths with CDN-aware rules
+```
+
+The XGG resolver is not optional for mature deployments. It provides the
+baseline needed to detect user-side DNS manipulation. Without a returned-IP
+ledger the server can only say "my DNS looked safe"; it cannot prove the user
+reached the same infrastructure.
+
+Required DNS evidence:
+
+| Evidence | Why It Matters |
+|---|---|
+| recursive answer set | what XGG would have returned |
+| authoritative answer set | whether recursive answers match the domain's authority |
+| CNAME chain | CDN and SaaS ownership path |
+| TTL profile | fast-flux and suspicious low-TTL patterns |
+| DNSSEC state | signed/unsigned/broken signature context |
+| multi-region answers | CDN variance vs localized poisoning |
+| returned-IP ledger | user-path comparison |
+| sinkhole/private-IP detection | hard hijack evidence |
+
+DNS alone never clears a site. DNS can only contribute:
+
+```text
+hard block evidence
+soft risk evidence
+trust evidence
+missing-proof evidence
+```
+
 ## 6. Step 3: Connection Identity
 
 Backend DNS can be clean while the user reaches a different IP due to:
@@ -357,6 +697,52 @@ vs historical domain infrastructure
 ```
 
 Never compare one IP to one IP. CDN sites legitimately return many IPs.
+
+The mature comparison is set-based:
+
+```text
+browser_remote_ip ∈ authorized_answer_set(domain, client_region, timestamp)
+```
+
+Where `authorized_answer_set` is derived from:
+
+```text
+XGG resolver returned IPs within TTL
+authoritative DNS answer set
+CNAME/CDN ownership
+known CDN edge ASN ranges
+TLS certificate SAN/CN identity
+SNI and HTTP Host consistency
+historical ASN/cert/nameserver profile
+operator allowlist for private infrastructure
+```
+
+Verdict behavior:
+
+| Case | Verdict Behavior |
+|---|---|
+| public domain resolves to private IP | hard BLOCK |
+| browser IP not in XGG ledger but TLS/cert/ASN/CDN are valid | soft DNS divergence, usually no block alone |
+| browser IP not in ledger and ASN/cert/CDN mismatch | ISOLATE or BLOCK on sensitive action |
+| browser IP private for public domain | hard BLOCK |
+| browser IP matches known CDN ASN but not exact returned IP | ALLOW/WARN based on other evidence |
+| browser IP missing from extension | mark connection identity missing; do not pretend verified |
+
+TLS identity is required for DNS-poisoning resistance. An attacker can make a
+domain resolve to their IP, but they normally cannot present a valid certificate
+for the target host unless the device also trusts a malicious root CA or the
+attacker controls certificate issuance. Therefore:
+
+```text
+DNS mismatch + valid TLS + authorized CDN ASN -> soft signal
+DNS mismatch + invalid TLS on sensitive action -> hard/near-hard signal
+public-domain-to-private-IP -> hard signal even before TLS
+```
+
+This design handles large companies correctly. Google, Microsoft, Cloudflare,
+Amazon, Akamai, Fastly, and CloudFront-backed sites may legitimately use many
+IPs. The system should verify authorized infrastructure, not demand exact IP
+equality.
 
 Correct comparison:
 
@@ -708,6 +1094,11 @@ Future weights must be changed only with corpus evidence and a shadow-mode diff.
 
 ## 15. Final Policy
 
+The final policy implementation must be a single decision kernel. Legacy
+fusion, strictness remapping, trustscore suppression, and staged policy may
+exist during migration, but mature production has one authoritative decision
+path:
+
 ```text
 if hard_evidence:
     BLOCK
@@ -760,6 +1151,41 @@ Target per-mode thresholds for the future generalized risk score:
 
 Until the generalized score exists, code constants in `policy.go` are the
 source of truth for shipped soft-rule thresholds.
+
+Production decision-kernel invariants:
+
+```text
+one request -> one evidence object -> one decision kernel -> one verdict
+no detector directly mutates final verdict outside the hard-evidence gate
+all hard blocks include hard_evidence[]
+all WARN/ISOLATE decisions include top risk contributors
+all ALLOW decisions on sensitive actions include required proof
+all suppressed soft evidence is logged and explainable
+all missing critical evidence is explicit, never silently treated as pass
+```
+
+Sensitive-action proof matrix:
+
+| Action | Minimum Proof Required | Missing Proof Result |
+|---|---|---|
+| read-only page | DNS/reputation sanity, no hard evidence | ALLOW/WARN by risk |
+| login/password | identity binding, valid TLS, safe credential sink | ISOLATE or BLOCK |
+| OAuth consent | known provider, scoped client risk, redirect sanity, scope severity | WARN/ISOLATE/BLOCK |
+| payment/checkout | payment processor scope, form/iframe sink verification | ISOLATE if unknown |
+| download/install | download URL, file reputation/hash/YARA, official command registry if command-copy | WARN/BLOCK |
+| support/contact | phone/wallet/remote-tool scam extraction, brand/domain relation | WARN/BLOCK if scam indicators |
+| QR/link handoff | recursive URL scan of extracted target | same as extracted URL |
+
+Mode behavior:
+
+```text
+Normal: minimize friction, hard evidence still blocks
+Safe: default balance, sensitive unknowns may isolate
+Strict: lower soft-risk thresholds, stricter download/scam handling
+Paranoid: sensitive proof missing -> isolate aggressively
+Ultra: default-deny unless every clearance gate passes
+Manual DeepTrust: no friction constraint; produce full dossier
+```
 
 ## 16. Example Full Report
 
@@ -882,6 +1308,49 @@ These workstreams are not strictly sequential. External source adapters,
 evidence UI, and corpus work can proceed while trust/risk scoring is being
 refined. Any enforcement-changing policy work still requires shadow rollout.
 
+### DT-0: Collapse Verdict Paths
+
+Before adding more detectors, collapse the runtime into one authoritative
+decision path.
+
+Current migration smell:
+
+```text
+fusion.Score still runs
+policy.Apply makes the newer decision
+strictness still references fusion-era behavior
+trustscore suppresses some soft rules
+connection-identity enrichment is partly post-decision
+```
+
+Target:
+
+```text
+fusion becomes either:
+  - a detector that emits visual/form evidence into DeepTrustEvidence, or
+  - deleted after parity tests pass
+
+strictness becomes:
+  - mode thresholds inside the decision kernel
+
+trustscore becomes:
+  - one component of DeepTrustEvidence.scoring
+
+connection identity becomes:
+  - pre-policy evidence, not only response enrichment
+```
+
+Acceptance criteria:
+
+```text
+one exported production decision function
+legacy fallback available only behind explicit shadow/debug flag
+all existing policy/fusion/strictness tests ported or mapped
+100% parity on current corpus where old behavior is intentionally preserved
+documented intentional diffs for improved behavior
+no new detector may return final verdict directly
+```
+
 ### DT-1: Evidence Object
 
 Create one `DeepTrustEvidence` object containing all source outputs:
@@ -932,6 +1401,21 @@ unit tests with timeout/error/malformed response
 no source can hard-block unless explicitly marked high-confidence
 ```
 
+External source rollout order:
+
+```text
+1. finish wrapper unwrappers: SafeLinks, Proofpoint, Mimecast, Cisco, Barracuda
+2. AbuseIPDB for raw IP / unexpected ASN / DNS divergence
+3. Google Web Risk / Safe Browsing conditional checks
+4. VirusTotal only for manual/deep scan and suspicious unknowns
+5. Netcraft/APWG/MISP only for licensed/operator deployments
+```
+
+Reason: wrapper unwrapping improves real enterprise-email coverage more than
+adding another reputation source. It reveals the actual destination before
+scoring and reduces both false positives on wrappers and false negatives hidden
+behind wrappers.
+
 ### DT-3: Trust Score
 
 Start with available data:
@@ -977,6 +1461,25 @@ phone/wallet/gift-card text
 OCR/QR
 network requests
 behavioral events
+```
+
+Page graph acceptance criteria:
+
+```text
+landing URL is one node, not the whole truth
+every form action becomes a sink node
+every iframe/script/download becomes a graph node
+every QR URL becomes a recursively scanned node
+every redirect hop is preserved
+same-organization edges are distinguished from third-party edges
+cross-origin does not mean malicious; unauthorized sensitive sink does
+```
+
+Graph verdict rule:
+
+```text
+a read-only clean landing page may still BLOCK if a graph child performs a
+credential/payment/download/command action that fails identity verification
 ```
 
 ### DT-6: Evidence UI
@@ -1030,6 +1533,38 @@ top disagreements manually reviewed
 
 No large engine rewrite ships directly to enforcement mode.
 
+### DT-9: Exhaustive DeepTrust Worker
+
+Build a separate asynchronous worker for T4 exhaustive investigation. Do not
+put these operations on the live `/v1/check` path.
+
+Capabilities:
+
+```text
+multi-region DNS and authoritative DNS comparison
+full crawl graph with depth/page/time limits
+OCR and QR recursion
+download detonation in separate network namespace
+archive unpacking
+source fanout to paid/slow providers
+similar-domain and campaign clustering
+repeated render passes at t+0, t+5m, t+30m for cloaking
+sanitized LLM-assisted scam-language classification
+analyst annotation queue
+```
+
+Acceptance criteria:
+
+```text
+job queue with per-user and per-domain limits
+partial report emitted within 90s
+full report continues asynchronously
+all artifacts retention-controlled
+no credentials/cookies from user browser enter sandbox
+download detonation cannot reach production network
+every child URL has its own evidence object
+```
+
 ## 19. Final Standard
 
 DeepTrust is mature when:
@@ -1050,19 +1585,88 @@ RUAT passes
 latency budgets hold
 ```
 
-Numeric final standard:
+Numeric final standard for release:
 
 ```text
 normal cached page: p95 <300ms
 normal uncached Safe-mode page: p95 <1s
 sensitive unknown page: verdict or explicit choice <=12s
-manual deep scan: hard cap 90s, partial report allowed
+manual deep scan: partial report <=90s, full report async <=30m unless operator extends
 Safe-mode false block rate on personal-100: 0
 Safe-mode false warn rate on personal-100: <1%
 known-bad corpus false negative rate: 0 for high-confidence feed/hard-rule cases
 public-domain-private-IP: always BLOCK
 CDN variance: no WARN unless corroborated by another risk signal
 ```
+
+Numeric final standard for broad corpus:
+
+```text
+Safe mode WARN+ false-positive rate on curated benign corpus: <=0.5%
+Safe mode BLOCK false-positive rate on curated benign corpus: <=0.1%
+Strict mode WARN+ false-positive rate: <=2%
+Ultra mode isolate false-positive rate: expected higher, but BLOCK FP <=0.5%
+high-confidence feed/hard-rule false-negative rate: 0
+fresh-phishing corpus recall target: >=80% in Safe, >=90% in Strict/Ultra
+credential-sink phishing recall target: >=95% when sandbox data available
+visual-brand phishing recall target: >=90% when visual service available
+support-scam recall target: >=75% after OCR/phone/wallet detectors ship
+QR phishing recall target: >=80% after QR recursion ships
+```
+
+Operational final standard:
+
+```text
+all production verdicts come from one decision kernel
+sandbox-render and visual-match health are release gates
+source adapters have timeout, TTL, cost class, and privacy class
+T4 deep scans are queued and rate-limited
+new policy ships shadow-first
+top policy disagreements reviewed before enforcement
+weekly rule-health report lists top FP/FN-producing reasons
+every P0/P1 finding produces corpus + test + code/doc update
+```
+
+Threat coverage target at maturity:
+
+| Threat Family | Mature Target |
+|---|---|
+| DNS known-bad / malware / C2 | A |
+| local DNS hijack / router compromise | A |
+| public domain to private IP | A |
+| raw-IP malware drops | A |
+| credential phishing with wrong sink | A |
+| visual brand impersonation | A- |
+| OAuth consent phishing | B+ |
+| ClickFix / command-copy attacks | A- |
+| malicious downloads | A- |
+| compromised legitimate site | B+ |
+| SafeLinks/Proofpoint/Mimecast wrapped phishing | B+ |
+| support scam / fake helpdesk | B+ after OCR/scam extraction |
+| QR-code phishing | B+ after QR recursion |
+| crypto-drainer / wallet fraud | B after wallet/action classifiers |
+| unknown zero-day phishing | B+ with sandbox+visual+action graph, not A because no zero-day detector is perfect |
+
+The product is never called "done" because a document says so. It is called
+mature only when the metrics above pass continuously.
+
+## 20. Non-Negotiable Engineering Rules
+
+```text
+1. No global trustreg additions for ordinary false positives.
+2. No detector owns final verdict except through the central hard-evidence gate.
+3. No paid source runs on every URL by default.
+4. No sensitive page is silently allowed when required proof is missing.
+5. No DNS result is treated as proof of safety.
+6. No exact-IP comparison for CDN-backed domains.
+7. No user override becomes global trust evidence.
+8. No engine rewrite ships without shadow-mode comparison.
+9. No report hides missing evidence.
+10. No real-user bug is closed without a corpus entry and regression test.
+```
+
+These rules matter more than adding another detector. They are what prevent the
+system from drifting back into patching symptoms.
 
 This is the target engine that makes XGenGuardian a serious anti-scam,
 anti-phishing, and zero-trust web investigation platform.
