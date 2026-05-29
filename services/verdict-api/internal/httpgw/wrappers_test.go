@@ -156,3 +156,54 @@ func TestUnwrap_MalformedInputs(t *testing.T) {
 		}
 	}
 }
+
+// --- Security: anchored host matching ---------------------------------------
+//
+// Regression for the substring-allowlist bypass: every detector must require
+// an EXACT or SUFFIX match on the wrapper host, never a substring match.
+// Otherwise an attacker registers e.g. "mimecast.com.attacker.com" and
+// smuggles a benign-looking `domain=` value through the unwrap while the
+// user's browser actually navigates to the attacker host.
+
+func TestUnwrap_SpoofedHostsRejected(t *testing.T) {
+	// Each row: an attacker-controlled host that LOOKS like a wrapper
+	// because the wrapper name appears as a substring. None should match.
+	spoofs := []string{
+		// Mimecast — the specific finding
+		"https://mimecast.com.attacker.com/s/abc?domain=phishing-target.com",
+		"https://protect-eu.mimecast.com.attacker.com/s/abc?url=https://x.com",
+		"https://x.mimecast.com.evil.example/?domain=target.com",
+		// SafeLinks
+		"https://safelinks.protection.outlook.com.attacker.com/?url=https://x.com",
+		// Proofpoint
+		"https://urldefense.proofpoint.com.attacker.com/v2/url?u=https://x.com",
+		"https://urldefense.com.attacker.com/v2/url?u=https://x.com",
+		// Cisco
+		"https://secure-web.cisco.com.attacker.com/abc/https://x.com",
+		// Barracuda
+		"https://linkprotect.cudasvc.com.attacker.com/url?a=https://x.com",
+		// Symantec
+		"https://clicktime.symantec.com.attacker.com/abc?u=https://x.com",
+		// Gmail
+		"https://www.google.com.attacker.com/url?q=https://x.com",
+	}
+	for _, in := range spoofs {
+		got := unwrapEmailGateway(in)
+		if got.Found {
+			t.Errorf("SPOOFED host must NOT be treated as a wrapper: %s → %+v", in, got)
+		}
+	}
+}
+
+// Trailing-dot FQDNs (`example.com.`) resolve identically and must be
+// normalized so a real wrapper request isn't accidentally bypassed by an
+// attacker-supplied trailing dot — and so a spoofed host can't slip
+// through by carrying one.
+func TestUnwrap_FQDNTrailingDot_Normalized(t *testing.T) {
+	// Real wrapper with trailing dot — should still match.
+	in := "https://eur01.safelinks.protection.outlook.com./?url=https%3A%2F%2Fexample.com%2F"
+	got := unwrapEmailGateway(in)
+	if !got.Found || got.Wrapper != "safelinks" {
+		t.Errorf("trailing-dot FQDN should still match wrapper: %s → %+v", in, got)
+	}
+}

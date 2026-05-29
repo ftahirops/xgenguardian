@@ -59,7 +59,10 @@ func unwrapEmailGateway(rawURL string) UnwrapResult {
 	if err != nil || u == nil || u.Host == "" {
 		return UnwrapResult{}
 	}
-	host := strings.ToLower(u.Hostname())
+	// Strip a trailing dot from FQDN form (`mimecast.com.` is valid DNS
+	// and resolves identically to `mimecast.com`, so it must hit the
+	// same allowlist check).
+	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
 
 	if t := unwrapSafeLinks(u, host); t != "" {
 		return UnwrapResult{Found: true, URL: t, Wrapper: "safelinks"}
@@ -151,7 +154,13 @@ func unwrapProofpoint(u *url.URL, host string) string {
 // then runs against that landing host. (Mimecast also has a `url=`
 // variant on its newer click-rewrite service; check both.)
 func unwrapMimecast(u *url.URL, host string) string {
-	if !strings.Contains(host, ".mimecast.com") {
+	// Anchored host match. Contains(".mimecast.com") would match
+	// attacker-controlled hosts like `mimecast.com.attacker.com` or
+	// `evil.com/.mimecast.com.spoof.com` — letting an attacker bless
+	// their own host as a Mimecast hop and smuggle a benign-looking
+	// `domain=` target through the unwrap. Use HasSuffix + exact-match
+	// in line with every other wrapper detector in this file.
+	if !strings.HasSuffix(host, ".mimecast.com") && host != "mimecast.com" {
 		return ""
 	}
 	if v := pickQueryParam(u, "url"); v != "" {
