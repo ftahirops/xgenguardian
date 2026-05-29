@@ -15,7 +15,8 @@ const p = new URLSearchParams(location.search);
 const rawU = p.get("u") || "";
 const url  = isHttpURL(rawU) ? rawU : "";
 const err  = (p.get("e") || "").slice(0, 200);
-const kind = p.get("k") === "conn" ? "conn" : "dns";
+const kindRaw = p.get("k") || "dns";
+const kind = (kindRaw === "conn" || kindRaw === "policy") ? kindRaw : "dns";
 
 document.getElementById("url").textContent = url || "(unknown)";
 document.getElementById("err").textContent = err || "(unknown)";
@@ -25,6 +26,17 @@ if (kind === "conn") {
   document.getElementById("title").textContent = "This site refused the connection.";
   document.getElementById("summary").textContent =
     "The browser found the domain but couldn't establish a connection to the server.";
+  document.getElementById("whyDNS").hidden = true;
+  document.getElementById("whyConn").hidden = false;
+} else if (kind === "policy") {
+  // v0.3.4 — upstream policy block (Cloudflare Family / NextDNS / enterprise
+  // rule / response filter). Not a DNS failure, not an XGG block. Tell the
+  // user honestly that something on their network is refusing it so they
+  // don't keep retrying.
+  document.getElementById("pill").textContent = "Blocked by network policy";
+  document.getElementById("title").textContent = "Your network or browser blocked this site.";
+  document.getElementById("summary").textContent =
+    "A DNS provider, parental-control filter, browser policy, or content blocker on your network refused the connection. This is not an XGenGuardian block — it happened before our engine saw the page.";
   document.getElementById("whyDNS").hidden = true;
   document.getElementById("whyConn").hidden = false;
 }

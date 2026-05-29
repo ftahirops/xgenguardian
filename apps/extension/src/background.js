@@ -791,16 +791,35 @@ const CONN_FAIL_ERRORS = new Set([
   "net::ERR_ADDRESS_UNREACHABLE",
   "net::ERR_NETWORK_CHANGED",
 ]);
+// v0.3.4 — Chrome emits these when an upstream policy refuses the
+// connection: enterprise rule, Cloudflare Family / NextDNS / ISP filter,
+// browser-extension blocker, or response-body block. None of them are DNS
+// or transport failures. Before v0.3.4 these codes weren't in any set,
+// so `onErrorOccurred` returned silently, the holding-page → /v1/check →
+// ALLOW path retried, the upstream blocked again, and the tab flipped
+// 15–20 times before something broke the cycle. Treating them like a
+// conn-fail (route to dnsfail.html with kind=policy) terminates the loop
+// and gives the user a clear "blocked by network policy" message.
+const POLICY_FAIL_ERRORS = new Set([
+  "net::ERR_NETWORK_ACCESS_DENIED",
+  "net::ERR_BLOCKED_BY_CLIENT",
+  "net::ERR_BLOCKED_BY_RESPONSE",
+  "net::ERR_BLOCKED_BY_ORB",
+  "net::ERR_BLOCKED_BY_ADMINISTRATOR",
+  "net::ERR_BLOCKED_BY_XSS_AUDITOR",
+]);
 
 chrome.webNavigation.onErrorOccurred.addListener(async (details) => {
   if (details.frameId !== 0) return;
   const err = details.error || "";
-  if (!DNS_FAIL_ERRORS.has(err) && !CONN_FAIL_ERRORS.has(err)) return;
+  if (!DNS_FAIL_ERRORS.has(err) && !CONN_FAIL_ERRORS.has(err) && !POLICY_FAIL_ERRORS.has(err)) return;
   if (shouldSkipURL(details.url)) return;
   // Skip when the FAILED URL is our own interstitial (avoid recursion).
   if (details.url.startsWith(chrome.runtime.getURL(""))) return;
   // Drop any session-cache entry for this URL — it was wrong (we told
-  // the user ALLOW but the page can't actually load).
+  // the user ALLOW but the page can't actually load). Critical for
+  // policy failures: without this, the cached ALLOW would replay on
+  // the next holding-page intercept and we'd loop again.
   try {
     const key = "v:" + (await sha256(normalizeForToken(details.url)));
     await chrome.storage.session.remove(key);
@@ -809,7 +828,9 @@ chrome.webNavigation.onErrorOccurred.addListener(async (details) => {
   const p = new URLSearchParams();
   p.set("u", details.url);
   p.set("e", err);
-  const kind = DNS_FAIL_ERRORS.has(err) ? "dns" : "conn";
+  const kind = DNS_FAIL_ERRORS.has(err) ? "dns"
+             : CONN_FAIL_ERRORS.has(err) ? "conn"
+             : "policy";
   p.set("k", kind);
   try {
     await chrome.tabs.update(details.tabId, {

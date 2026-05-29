@@ -73,6 +73,72 @@ browser-lock scareware with support number
 chat widgets asking for phone/order/email under fake brand
 ```
 
+### Current Mechanism In Code
+
+Current support-scam coverage is behavior-only. The shipped path is:
+
+```text
+sandbox-render injects JS hooks
+  -> counts popup_open / alert / confirm / prompt / fullscreen_req /
+     beforeunload / clipboard_write / auto_download
+  -> verdict-api maps counters to behavior reason codes
+  -> policy.Apply blocks only the composite scareware case
+```
+
+Current reason codes:
+
+```text
+POPUP_STORM_DETECTED
+ALERT_LOOP_DETECTED
+FULLSCREEN_TRAP_DETECTED
+BEFOREUNLOAD_ABUSE
+CLIPBOARD_HIJACK_ATTEMPT
+AUTO_DOWNLOAD_TRIGGER
+FAKE_SUPPORT_SCAREWARE
+```
+
+Current decision behavior:
+
+```text
+popup storm alone -> WARN
+clipboard hijack alone -> WARN
+3+ abuse classes together -> BLOCK as FAKE_SUPPORT_SCAREWARE
+```
+
+Code references:
+
+```text
+services/sandbox-render/app/main.py
+services/verdict-api/internal/httpgw/behavior.go
+services/verdict-api/internal/httpgw/policymap.go
+services/verdict-api/internal/policy/policy.go
+services/verdict-api/internal/policy/policy_test.go
+```
+
+Estimated current detection:
+
+| Scam Variant | Current Detection Estimate | Why |
+|---|---:|---|
+| loud scareware with popup storm + alerts + fullscreen | 60-75% if sandbox-render is healthy | composite behavior detector can block |
+| popup-only scam | 30-40% | usually WARN, not full scam classification |
+| fake support page with visible phone number only | 0-10% | no phone extraction |
+| phone number embedded in screenshot/image | 0% | no OCR |
+| remote-tool lure without popup storm | 0-10% | no AnyDesk/TeamViewer/RustDesk detector |
+| refund/gift-card support scam | 0-10% | no gift-card/refund language detector |
+| quiet fake support chat widget | 0-10% | no fake-chat/action classifier |
+| same scam phone reused across domains | 0% | no phone campaign graph |
+
+Overall category estimate today:
+
+```text
+with sandbox-render healthy: 10-20% broad support-scam coverage
+with sandbox-render down: 0-5% broad support-scam coverage
+```
+
+This is an engineering estimate, not a measured SLO, because there is not yet a
+labeled support-scam corpus. Building that corpus is part of this category's
+first implementation milestone.
+
 ### Mature Detection Strategy
 
 Support scam detection should combine:
@@ -88,6 +154,917 @@ scareware behavior
 fullscreen/popup/beforeunload traps
 payment language
 support-page action classifier
+```
+
+Research-backed scam indicators:
+
+| Indicator | Source Basis | Detection Approach |
+|---|---|---|
+| pop-up or warning says to call a phone number | Microsoft and FTC both warn that real tech/security warnings should not instruct users to call a pop-up phone number | DOM text + OCR + phone extraction |
+| unsolicited support contact or urgent "device infected" message | FTC/FBI/Microsoft pattern | support-action classifier + scare-language dictionary |
+| request for remote access | FBI, FTC, Microsoft, AnyDesk, TeamViewer guidance | remote-tool keyword/link/download detector |
+| request to install remote-control software | FBI Phantom Hacker guidance and vendor anti-scam pages | RMM/remote-tool detector + download graph |
+| payment by gift card | FTC says gift-card payment demands are scam indicators | gift-card phrase detector |
+| payment by wire, crypto, payment app, bank transfer | FBI/FTC support-scam and Phantom Hacker warnings | payment-method phrase detector |
+| fake refund / overpayment / bank-security story | FBI Phantom Hacker pattern | refund/banking narrative classifier |
+| fake brand support on non-brand domain | Microsoft/FTC impersonation pattern | brand claim + orggraph/domain mismatch |
+| pressure/urgency/threat language | common scam pattern | visible text + OCR phrase scoring |
+| same phone number reused across unrelated domains | campaign behavior | phone-number graph |
+
+Key source references:
+
+```text
+Microsoft: fake support pop-ups commonly show warnings and phone numbers.
+FTC: tech-support scams ask for remote access and payment; gift cards are a scam indicator.
+FBI: Phantom Hacker/support scams start with fake support contact, then remote access and financial transfer pressure.
+AnyDesk/TeamViewer: legitimate remote tools are abused by scammers; unsolicited remote-access requests are unsafe.
+Microsoft Quick Assist guidance: remote assistance should be controlled by official/internal support channels.
+```
+
+Sources:
+
+- Microsoft tech-support scams: <https://support.microsoft.com/en-us/security/avoid-and-report-microsoft-technical-support-scams>
+- Microsoft Defender support scams: <https://learn.microsoft.com/en-us/defender-endpoint/malware/support-scams>
+- FTC tech-support scams: <https://consumer.ftc.gov/features/pass-it-on/impersonator-scams/tech-support-scams>
+- FTC gift-card scams: <https://consumer.ftc.gov/articles/avoiding-and-reporting-gift-card-scams>
+- FBI tech-support scams: <https://www.fbi.gov/how-we-can-help-you/scams-and-safety/common-frauds-and-scams/tech-support-scams>
+- FBI Phantom Hacker warning: <https://www.fbi.gov/contact-us/field-offices/phoenix/news/press-releases/the-phantom-hacker-fbi-phoenix-warns-public-of-new-financial-scam>
+- AnyDesk abuse prevention: <https://anydesk.com/en/abuse-prevention>
+- TeamViewer scam guidance: <https://www.teamviewer.com/en/global/support/knowledge-base/teamviewer-remote/security/teamviewer-and-scamming/>
+- Microsoft Quick Assist admin guidance: <https://learn.microsoft.com/en-us/windows/client-management/quick-assist>
+
+### Aggressive Tech-Support Page Mode
+
+If a page is classified as tech-support-like from URL, DOM text, OCR text,
+visual claim, phone number, or support/action wording, run the full support
+scam checklist. Do not wait for popup behavior.
+
+Trigger support mode when any of these are true:
+
+```text
+URL path/title/text contains support/help/defender/security/virus/locked/error
+OCR text contains support/help/virus/infected/locked/call/toll-free
+phone number appears with security/support/error language
+brand claim appears with support language
+remote-tool name/link/download appears
+refund/bank/security/payment story appears
+page uses fullscreen/popup/beforeunload/alert behavior
+```
+
+When support mode triggers, collect:
+
+```text
+phone_numbers_dom[]
+phone_numbers_ocr[]
+tel_links[]
+support_brand_claims[]
+official_brand_support_domains[]
+remote_tool_mentions[]
+remote_tool_links[]
+remote_tool_downloads[]
+gift_card_phrases[]
+wire_crypto_payment_phrases[]
+refund_or_bank_security_phrases[]
+urgency_threat_phrases[]
+scareware_behavior_counters
+official_channel_match
+phone_reputation
+same_template_or_screenshot_campaign
+```
+
+Phone-number verification should be automated:
+
+```text
+normalize to E.164 when possible
+extract surrounding text window
+search local campaign graph
+check if number appears on official brand support pages already curated
+check if number appears across unrelated domains
+check if number is toll-free/VoIP/high-risk pattern
+never trust a phone number just because it is local-looking
+```
+
+Official-channel verification:
+
+```text
+claimed brand -> known official support domains
+claimed brand -> known official app/help portal
+phone number shown on official brand domain -> weak positive
+phone number shown only on current unknown domain -> risk
+page says "Microsoft/Apple/Google support" outside official orggraph -> risk
+```
+
+Remote-tool detector dictionary:
+
+```text
+AnyDesk
+TeamViewer
+RustDesk
+UltraViewer
+Supremo
+LogMeIn / GoToAssist / GoTo Resolve
+ConnectWise ScreenConnect
+Splashtop
+Zoho Assist
+Chrome Remote Desktop
+Microsoft Quick Assist
+Microsoft Remote Help
+VNC / UltraVNC / TightVNC
+RDP / Remote Desktop
+NinjaOne / Atera / Syncro / Tactical RMM / MeshCentral
+```
+
+Gift-card/payment detector dictionary:
+
+```text
+gift card
+Apple card
+Google Play
+Steam card
+Target card
+Walmart card
+prepaid card
+scratch code
+activation code
+wire transfer
+bank transfer
+crypto
+Bitcoin
+USDT
+wallet address
+payment app
+refund fee
+security deposit
+software support fee
+```
+
+Scare/urgency phrase detector:
+
+```text
+your computer is infected
+windows locked
+defender alert
+trojan detected
+do not close this window
+call immediately
+toll free
+your IP is compromised
+bank account compromised
+hackers detected
+unauthorized transaction
+refund pending
+security department
+do not tell anyone
+stay on the line
+```
+
+### Support Scam Score
+
+Use composite scoring. No single weak phrase should block a page, but the
+combination becomes very strong.
+
+| Signal | Weight | Notes |
+|---|---:|---|
+| phone number + security/support warning | +0.35 | strongest common web signal |
+| phone number from OCR, not DOM | +0.40 | attackers hide phone in images |
+| brand claim + non-brand domain | +0.30 | impersonation context |
+| remote-tool mention/link/download | +0.35 | FBI/FTC/vendor-backed scam pattern |
+| gift-card/wire/crypto payment phrase | +0.45 | very high scam signal |
+| refund/bank-security/Phantom Hacker story | +0.35 | high-risk narrative |
+| fullscreen/popup/alert/beforeunload composite | +0.60 | current hard behavioral pattern |
+| same phone across unrelated domains | +0.50 | campaign evidence |
+| official support-domain/phone match | -0.35 | weak trust, never clears hard behavior |
+| known trusted support host with no risky action | -0.40 | suppress noisy support wording |
+
+Verdict thresholds for support mode:
+
+```text
+score >= 0.85 -> BLOCK
+score >= 0.55 -> WARN/ISOLATE depending user mode and action
+score < 0.55 -> ALLOW unless another engine stage blocks
+```
+
+Hard-block combinations:
+
+```text
+phone number + fake brand + popup/fullscreen/alert behavior
+phone number + remote-tool install instruction + unknown/non-brand domain
+gift-card/wire/crypto payment request + support/refund/security context
+same phone number in confirmed scam campaign
+remote-tool download served from unknown/fresh/raw-IP domain
+```
+
+False-positive protections:
+
+```text
+official support domain can suppress support wording only, not hard behavior
+remote-tool vendor's own official pages do not block just for naming the tool
+legitimate IT docs mentioning AnyDesk/TeamViewer require no phone/payment/scare context
+news/education pages discussing scams are classified informational, not scam
+local business support pages with phone numbers are WARN only if scare/payment/remote-tool signals exist
+```
+
+### Out-Of-Box Elder-Protection Strategy
+
+Important reality:
+
+```text
+some real businesses are predatory
+some genuine-looking companies sell useless support
+some pages are legal but still harmful for elderly users
+phone caller ID can be spoofed
+manual verification of every phone number is impossible
+```
+
+Therefore support-scam protection must move from "is this website fake?" to:
+
+```text
+is this page trying to make a vulnerable user take a dangerous action?
+```
+
+Dangerous actions:
+
+```text
+call this number now
+install remote access software
+share a remote access code
+pay by gift card / wire / crypto
+log into bank while on a support call
+send refund/security payment
+download a patch from unknown support page
+disable security tools
+stay on the phone / do not tell anyone
+```
+
+#### Phone Number Intelligence Layer
+
+Phone numbers become first-class evidence objects.
+
+```text
+PhoneEvidence
+  raw_text
+  normalized_e164
+  country
+  line_type
+  carrier
+  voip_or_tollfree
+  first_seen_by_xgg
+  domains_seen_on[]
+  brands_claimed_with[]
+  support_context_count
+  scam_context_count
+  official_brand_match
+  reputation_sources[]
+  complaint_or_abuse_hits[]
+  velocity_score
+  campaign_score
+```
+
+Automated phone checks:
+
+| Check | Why |
+|---|---|
+| line type: VoIP/toll-free/mobile/fixed | many scam operations use disposable VoIP/toll-free numbers |
+| country mismatch | "Microsoft US support" with unrelated country pattern is risk |
+| first-seen timestamp | newly observed support number is suspicious |
+| domain fanout | same number on many unrelated domains is campaign evidence |
+| brand fanout | same number claims Microsoft, Apple, PayPal, bank support = strong scam signal |
+| official support match | number appears on curated official brand support domain = weak positive |
+| reputation vendor result | commercial/crowd phone reputation as advisory evidence |
+| web-search footprint | number appears in scam complaints or many spammy pages |
+| page context | phone shown next to virus/security/refund/gift-card language |
+
+Potential phone-intelligence sources:
+
+```text
+Twilio Lookup
+Telesign Phone ID / Intelligence
+Hiya number reputation
+Truecaller-style reputation if licensed
+carrier/GSMA Number Verify where available
+GSMA SIM Swap / Mobile Identity APIs for account-risk contexts
+internal XGG phone campaign graph
+user reports and RUAT findings
+official brand support registry
+```
+
+Limits:
+
+```text
+caller ID spoofing means incoming-call number is not proof
+phone reputation APIs are advisory, not ground truth
+new scam numbers may have no history
+legitimate small businesses can use VoIP
+never hard-block from phone reputation alone
+```
+
+Phone hard-block combinations:
+
+```text
+phone number + fake brand + support/security warning + non-official domain
+phone number + remote-tool instruction + unknown/non-brand domain
+phone number + gift-card/wire/crypto/refund story
+same number reused across unrelated scam-looking domains
+number previously confirmed malicious by analyst/corpus
+```
+
+#### Official Channel Verification
+
+Instead of asking an operator to manually verify every phone number, maintain a
+small high-value official-contact registry:
+
+```text
+brand
+official support domains
+official support portal URLs
+official phone numbers where published
+official app deep links
+official "how to contact us" page
+source URL
+last verified date
+review owner
+```
+
+Verification rule:
+
+```text
+If page claims Brand X support, the page must either be on Brand X's official
+support domain or point the user to Brand X's official support channel.
+```
+
+Do not trust:
+
+```text
+phone number from search ads
+phone number from random SEO page
+phone number in pop-up warning
+phone number in screenshot
+phone number in unsolicited text/email
+caller ID display name
+```
+
+User guidance rendered by product:
+
+```text
+Do not call this number. Open the company's official app or type the official
+website yourself. Use the support number printed on your card, statement, or
+official account portal.
+```
+
+#### Elder-Safe Mode
+
+Add an optional "Elder Safe" or "Family Guardian" mode.
+
+Behavior:
+
+```text
+support phone number on unknown page -> WARN/ISOLATE
+remote access tool download after support-scam page -> BLOCK
+gift-card/wire/crypto language -> BLOCK
+bank login after support-scam flow -> interrupt
+copying phone number from risky page -> show warning
+clicking tel: link from risky page -> block/confirm
+opening AnyDesk/TeamViewer/RustDesk/Quick Assist from risky flow -> block/confirm
+```
+
+High-friction interventions for vulnerable users:
+
+```text
+cooling-off timer before proceeding
+"call official number instead" button
+trusted-contact approval for remote-tool install or gift-card/crypto warning
+large plain-language warning: "This is how support scams steal money"
+printable/saveable report for family member
+"Report this number" button
+```
+
+This is not only detection. It is harm reduction. Elderly users are often
+scammed after the page has convinced them to leave the browser and continue by
+phone. The browser must interrupt that transition.
+
+#### Local Phone-Number Masking For Elder Safe Mode
+
+For protected users, the browser extension may locally rewrite the rendered
+page. This does not alter the third-party website or server. It only changes
+what the protected user sees in their own browser session.
+
+When a page is support-like and its phone number is unverified or suspicious:
+
+```text
+hide or mask the page's phone number
+disable tel: links to that number
+show an XGenGuardian warning panel near the masked number
+explain exactly why the number is not trusted
+offer verified official-channel alternatives when available
+offer guardian/analyst review when not available
+allow copy/export of the evidence report
+```
+
+Example local replacement:
+
+```text
+Original page text:
+  Call Microsoft Support now: 1-800-XXX-XXXX
+
+Rendered locally for Elder Safe user:
+  [Phone number hidden by XGenGuardian]
+  This support number is not verified as an official Microsoft support channel.
+  Do not call it or install remote-access software.
+
+  Safer options:
+  - Open official Microsoft support
+  - Ask trusted contact to review
+  - View evidence
+  - Report this number
+```
+
+Masking triggers:
+
+```text
+support-like page + phone number + unverified provider
+phone number + fake/security/virus/refund language
+phone number + remote-tool instruction
+phone number + gift-card/wire/crypto language
+phone number + claimed major brand but no official affiliation proof
+phone number appears in known/suspected campaign graph
+```
+
+Masking must include proof:
+
+```text
+which phone number was hidden
+where it appeared: DOM / OCR / tel link / image
+claimed brand
+domain age
+official-channel match status
+remote-tool/payment/scare signals found
+campaign/reputation status
+which rule caused masking
+timestamp
+```
+
+User controls:
+
+```text
+Elder Safe: hide by default, guardian can reveal
+Safe: warn with click-to-reveal
+Normal: show warning only
+Enterprise/Family admin: choose policy centrally
+```
+
+Do not silently replace a number with an arbitrary XGG phone number. Safer
+behavior is:
+
+```text
+hide suspicious number
+show verified official support URL/number only if it came from curated official registry
+otherwise route to guardian/analyst review
+```
+
+Reason: replacing with the wrong number is dangerous. XGG should guide the user
+to verified official channels, not become a support call center by default.
+
+#### Cross-Channel Flow Detection
+
+The scam may start on a website but continue outside it.
+
+Track session flow:
+
+```text
+support-scam page seen
+phone number copied/clicked
+remote access tool page opened
+remote tool downloaded
+bank/crypto/payment page opened soon after
+gift-card/crypto/wire instructions visible
+```
+
+Escalation rule:
+
+```text
+support-scam context + remote tool + bank/payment/crypto within 60 minutes
+  -> high-risk elder-scam flow
+  -> block/interrupt even if each individual page looks legitimate
+```
+
+This handles the hardest case: the phone number may belong to a real-looking
+company, AnyDesk is a real website, and the bank is a real bank. The risk is in
+the sequence.
+
+#### Manual Intervention, But Only For High Leverage
+
+Manual review is allowed for:
+
+```text
+new phone number seen across many users
+high-traffic uncertain support domain
+possible false positive against real vendor support
+official-contact registry updates
+confirmed scam campaign clustering
+```
+
+Manual review is not allowed for:
+
+```text
+every phone number
+every local business
+every one-off support page
+every user override
+```
+
+Reason: manual verification does not scale. The scalable path is automated
+phone evidence + official-channel registry + campaign graph + elder-safe
+action interruption.
+
+#### Verified Support Provider Registry
+
+For pages that claim to be a technical support provider, add a voluntary
+verification program. This is not a whitelist. It is evidence that can reduce
+friction only when no scam behavior is present.
+
+Default posture:
+
+```text
+all tech-support providers start as unverified
+unverified does not legally mean "confirmed scam"
+unverified does mean "not trusted for elderly/sensitive users"
+trust is fragile and must be continuously earned
+one serious inconsistency can downgrade trust
+hard scam behavior overrides all documents
+```
+
+For Elder Safe mode, the product posture is intentionally stricter:
+
+```text
+unknown tech-support company = suspicious until proven
+unknown tech-support company + phone number = interrupt
+unknown tech-support company + remote access = block/guardian approval
+unknown tech-support company + payment request = block
+unknown tech-support company claiming Microsoft/Apple/Google/bank support =
+  block/isolate until affiliation is verified from the claimed brand's source
+```
+
+Provider must prove:
+
+```text
+legal business identity
+domain ownership
+phone number ownership
+support portal ownership
+physical/legal jurisdiction
+owner/officer identity where available
+official brand affiliation if they claim one
+privacy/refund/contact policy
+no history of confirmed scam reports in XGG corpus
+```
+
+Multi-level trust checks:
+
+| Layer | Question | Suspicious If |
+|---|---|---|
+| domain age | how long has the support domain existed? | very new domain, recent ownership change, short-lived pattern |
+| company age | how long has the legal entity existed? | newly formed company claiming major-brand support |
+| registry footprint | does the business exist in official registries? | no registry match, dissolved entity, mismatched name |
+| address consistency | does address match registry/site/documents? | virtual mailbox only, mismatched country/state, fake-looking address |
+| phone consistency | does number match official business records/site? | number appears on unrelated domains or mismatched company |
+| domain ownership | can provider prove DNS control? | no DNS TXT proof, free email used for support identity |
+| affiliation proof | does claimed brand confirm relation? | "Microsoft support" claim with no Microsoft-controlled proof |
+| web history | does the business have stable historical presence? | only recent SEO pages, no long-term footprint |
+| complaint footprint | are there scam/abuse reports? | complaints, repeated chargeback/refund complaints, campaign reuse |
+| behavior | does page ask for risky actions? | remote access, gift cards, crypto, wire, bank login, secrecy |
+| transparency | are terms/refund/privacy/contact clear? | hidden fees, vague company identity, no legal contact |
+
+Trust scoring should be fragile:
+
+```text
+old domain alone is not enough
+business registration alone is not enough
+phone ownership alone is not enough
+uploaded certificates alone are not enough
+brand affiliation claim is ignored until verified from brand-controlled source
+any hard-risk behavior immediately downgrades trust
+```
+
+Trust downgrade examples:
+
+```text
+company says it is Microsoft-certified but Microsoft source cannot confirm
+registry address differs from website address
+domain registered last week but claims years of support history
+support phone appears across many unrelated brands
+provider refuses basic identity verification while requesting remote access
+provider asks for gift cards, crypto, wire transfer, seed phrase, or bank login
+```
+
+Classification states:
+
+| State | Meaning | Elder Safe Behavior |
+|---|---|---|
+| unverified | no proof reviewed | warn/isolate support contact; block risky actions |
+| suspicious-unverified | weak/inconsistent identity or risky context | block support phone/remote/payment flow |
+| verification-pending | provider submitted evidence, not reviewed | still untrusted |
+| verified-identity | business/domain/phone verified | lower friction only for normal support |
+| verified-affiliation | claimed brand confirmed by official source | scoped trust for that brand/support action |
+| verified-but-risky | identity real, behavior risky | warn/block by behavior |
+| confirmed malicious | fake proof, scam campaign, hard evidence | block + report package |
+
+Evidence accepted:
+
+| Evidence | Verification Method |
+|---|---|
+| business registration | OpenCorporates/state registry/company registry lookup |
+| D-U-N-S or business identifier | Dun & Bradstreet lookup where applicable |
+| domain ownership | DNS TXT challenge on claimed domain |
+| support email ownership | email challenge to same-domain address, not Gmail/Outlook free mailbox |
+| phone number control | one-time code to business phone line, rate-limited |
+| brand affiliation | official partner directory/API check, never just uploaded PDF |
+| Microsoft affiliation | Microsoft Partner Center/PartnerID or public partner directory evidence |
+| refund/contact policy | policy URL on owned domain |
+| support tool usage | declared RMM/remote tool list and customer-consent flow |
+
+Uploaded documents are evidence leads, not final proof. Analyst must verify
+them against official sources:
+
+```text
+company registry
+brand partner directory
+public partner profile
+domain DNS challenge
+phone challenge
+official email/domain challenge
+government/state registry
+business database where available
+```
+
+Sources for verification concepts:
+
+- Microsoft Partner Center verification: <https://learn.microsoft.com/en-us/partner-center/enroll/verification-responses>
+- Microsoft PartnerID verification API: <https://learn.microsoft.com/en-us/partner-center/developer/get-partner-by-mpn-id>
+- Microsoft Find a Partner: <https://partner.microsoft.com/en-us/membership/find-a-partner>
+- D-U-N-S lookup: <https://www.dnb.com/en-us/smb/duns/duns-lookup.html>
+- OpenCorporates API: <https://api.opencorporates.com/>
+
+Affiliation rule:
+
+```text
+If a provider claims "Microsoft support", "Apple support", "Google support",
+"PayPal support", "bank support", or similar, they must prove affiliation from
+the claimed brand's official channel. A document uploaded by the provider is
+not enough.
+```
+
+Verification states:
+
+| State | Meaning | Policy Effect |
+|---|---|---|
+| unverified | no provider proof | no trust benefit |
+| domain verified | provider controls domain | weak trust only |
+| business verified | legal entity confirmed | weak trust only |
+| phone verified | provider controls number | weak trust only |
+| affiliation verified | official partner/support affiliation confirmed | stronger trust for that brand/scope |
+| reviewed approved | analyst reviewed supporting evidence | scoped trust, still overridden by hard evidence |
+| revoked | failed review or later abuse | strong risk signal |
+
+Failure handling:
+
+```text
+fake details -> confirmed malicious candidate
+inconsistent details -> suspicious-unverified
+refusal to verify + no risky behavior -> unverified, not confirmed scam
+refusal to verify + risky support behavior -> suspicious-unverified / block in Elder Safe
+verified identity + scam behavior -> verified-but-risky, behavior wins
+```
+
+Never allow verification to suppress:
+
+```text
+gift-card/wire/crypto payment requests
+seed phrase requests
+unauthorized credential sinks
+public-domain-private-IP
+malware downloads
+remote access without clear consent language
+confirmed scam phone campaign reuse
+```
+
+#### Verification Workflow
+
+User reports or engine flags a provider:
+
+```text
+1. Provider page detected as support-like.
+2. Engine extracts company name, domain, phone, claimed brand, support flow.
+3. If high-risk, user sees warning immediately.
+4. Provider may submit verification through XGG portal.
+5. Automated checks run first.
+6. Analyst reviews only high-impact or affiliation-claiming providers.
+7. Approved providers get scoped trust, not global allow.
+8. Any later hard evidence revokes trust automatically.
+```
+
+Automated checks:
+
+```text
+OpenCorporates/company registry search
+D-U-N-S lookup where available
+DNS TXT domain challenge
+same-domain email challenge
+phone OTP challenge
+official partner directory lookup
+official support-domain cross-check
+sanctions/abuse/report corpus check
+website age / RDAP / CT / ASN stability check
+```
+
+Analyst review checklist:
+
+```text
+Does legal entity exist?
+Does domain belong to the entity?
+Does phone number belong to the entity?
+Does the website clearly disclose business identity?
+Does the page falsely imply brand affiliation?
+Does the provider ask for gift cards/wire/crypto?
+Does the provider use remote tools with clear consent and session disclosure?
+Are refund/fees/support terms visible?
+Is there complaint/campaign evidence?
+```
+
+#### Automated Outreach Guardrails
+
+Do not build a system that automatically calls or emails every suspected
+provider. That can become abuse, spam, or legal risk.
+
+Allowed outreach:
+
+```text
+verification email only after provider initiates verification
+phone OTP only after provider enters the phone number in verification portal
+brand affiliation check only through official APIs/directories or analyst review
+high-risk report sent to internal analyst queue, not to random third parties
+```
+
+Not allowed:
+
+```text
+auto-calling support numbers from suspicious sites
+mass-emailing companies demanding documents
+accepting uploaded certificates as proof without official-source verification
+letting one analyst approval override hard scam behavior
+```
+
+#### Reporting Pipeline
+
+For confirmed scams:
+
+```text
+create XGG campaign record
+store phone/domain/wallet/remote-tool evidence
+add corpus entry
+add reason-code regression test
+mark provider/phone as confirmed malicious
+optionally export report package for FTC/FBI/brand abuse portal/operator
+```
+
+Report package should contain:
+
+```text
+URL
+phone number
+screenshots
+OCR text
+DOM text
+remote-tool/payment indicators
+redirect chain
+domain age
+business identity claims
+official-channel mismatch
+evidence timestamp
+analyst notes
+```
+
+#### Elder-Safe Verified Provider Rule
+
+In Elder Safe mode:
+
+```text
+unverified support provider + phone number -> WARN/ISOLATE
+unverified support provider + remote tool -> BLOCK/guardian approval
+unverified support provider + payment request -> BLOCK
+verified provider + normal support contact -> ALLOW/WARN by evidence
+verified provider + gift-card/crypto/wire/seed phrase -> BLOCK anyway
+```
+
+This solves the "real company that still scams" problem better than website
+reputation. A real company can still behave dangerously; behavior and action
+always outrank paperwork.
+
+#### Support-Specific Trust Evidence Model
+
+For tech-support pages, trust must be evaluated across identity layers. A page
+is not trusted because it is online, has HTTPS, or calls itself "certified".
+
+Support trust evidence:
+
+| Source | How It Helps | How It Can Fail |
+|---|---|---|
+| domain | proves where the support page is hosted | new domain, brand-like domain without affiliation, unstable DNS |
+| email | proves support contact belongs to a domain | free mailbox, reply-to mismatch, no DMARC alignment |
+| phone | proves support contact route | reused across unrelated brands, VoIP/toll-free with scam context |
+| legal company | proves entity exists | new/dissolved/mismatched company, fake address |
+| owner/operator | creates accountability | anonymous operator for sensitive support service |
+| brand affiliation | proves right to claim Microsoft/Apple/Google/etc. support | uploaded badge/PDF with no official brand source |
+| payment identity | proves who receives money | recipient does not match company, crypto/gift-card/wire |
+| support channel | proves official support flow | pop-up number, random SEO support page |
+| remote-tool flow | proves whether remote access is controlled/consented | AnyDesk/TeamViewer/Quick Assist pushed from risky page |
+| software/download | proves publisher/source of any tool | unsigned/raw-IP/fresh-domain download |
+| social/marketplace profile | supporting footprint only | fresh/stolen profile, no domain linkback |
+
+Support-page trust scoring:
+
+```text
+start from unverified
+add weak trust for stable domain/company/phone/email consistency
+add stronger trust only for official brand-controlled affiliation proof
+subtract for contradictions
+hard-block for dangerous support behavior
+```
+
+Positive support evidence:
+
+```text
+domain is old and stable
+company registry is active and consistent
+support phone appears on verified official domain
+same-domain support email with SPF/DKIM/DMARC alignment
+business/payment identity matches domain/company
+claimed brand affiliation confirmed by official brand source
+remote-support consent flow is explicit and non-deceptive
+refund/contact/privacy policy is clear
+```
+
+Negative support evidence:
+
+```text
+new domain claiming years of support history
+Microsoft/Apple/Google/bank support claim without official affiliation proof
+phone appears on unrelated support domains
+phone number appears only in OCR/image/popup
+free email used for business support identity
+company registry absent/dissolved/mismatched
+payment recipient differs from company
+remote access requested before identity proof
+gift-card/wire/crypto requested
+user told not to tell anyone
+```
+
+Support-specific action policy:
+
+| Action Asked From User | Required Trust | Elder Safe Behavior If Not Proven |
+|---|---|---|
+| read support article | low | allow/warn by content |
+| call support number | verified support channel | mask number + warn/isolate |
+| install remote tool | verified support + explicit consent + guardian mode | block/guardian approval |
+| share remote access code | verified support + active consent | block/guardian approval |
+| enter password/account | verified identity + safe sink | isolate/block |
+| log into bank during support flow | strong official proof + safe context | interrupt strongly |
+| pay support fee | verified company/payment identity | warn/isolate |
+| gift-card/wire/crypto payment | never trusted | block |
+| seed phrase/security code | never trusted | block |
+| disable security software | enterprise-admin only | block |
+
+Support trust states:
+
+```text
+unknown
+unverified
+suspicious-unverified
+verification-pending
+verified identity
+verified affiliation
+verified support channel
+verified-but-risky
+confirmed malicious
+revoked
+```
+
+Support trust examples:
+
+```text
+official Microsoft support page on microsoft.com -> verified support channel
+local repair shop with old domain + registry + consistent phone -> verified identity, not Microsoft affiliation
+new domain "microsoft-help-center" + phone + AnyDesk -> block/isolate
+registered company + gift-card payment request -> block anyway
+TeamViewer official docs -> allow, because remote-tool mention is informational
+random blog explaining support scams -> allow, because action is educational not support contact
+```
+
+Trust-engine principle for this category:
+
+```text
+The engine does not ask only "is this support website real?"
+It asks "is this identity verified for the exact support action it is asking
+an elderly user to take?"
 ```
 
 ### Features To Add
@@ -1009,6 +1986,229 @@ operator trusted IP -> allow only via scoped operator config
 ## 23. Cross-Cutting Engineering Work
 
 These improvements affect many categories.
+
+### 23.0 Trust Verification Framework
+
+XGenGuardian should build a reusable trust-verification framework, not only a
+URL scanner. The core rule:
+
+```text
+online presence is not trust
+website exists is not trust
+HTTPS is not trust
+email address exists is not trust
+phone number answers is not trust
+company claims are not trust
+uploaded certificate is not trust
+trust requires independent corroboration across identity layers
+```
+
+This framework should verify:
+
+```text
+domain
+email
+phone number
+legal company
+owner/operator
+brand affiliation
+payment identity
+support identity
+app/OAuth identity
+download/software publisher
+social profile / marketplace profile
+```
+
+The output is an identity dossier:
+
+```text
+IdentityDossier
+  subject_type
+  subject_value
+  claimed_identity
+  proof_layers[]
+  contradictions[]
+  trust_score
+  risk_score
+  verification_state
+  allowed_actions[]
+  forbidden_actions[]
+  evidence_links[]
+```
+
+#### Trust Layers
+
+| Layer | What To Verify | Good Evidence | Bad / Suspicious Evidence |
+|---|---|---|---|
+| domain | ownership, age, DNS, CT, nameservers | old stable domain, DNS TXT proof, stable CT history | new domain, hidden ownership, sudden NS/ASN change |
+| email | domain relation, mailbox control, SPF/DKIM/DMARC | same-domain email, DMARC aligned, verified mailbox | free mailbox for company support, spoofed sender, no DMARC |
+| phone | control, line type, campaign reuse, official registry match | verified phone challenge, appears on official domain | VoIP/toll-free reused across unrelated brands |
+| company | legal registration, age, address, officer data | official registry match, consistent address | dissolved/new entity, mismatched address/name |
+| owner/operator | human/business accountability | verified officer/contact path | anonymous operator for sensitive service |
+| brand affiliation | official partner/channel proof | brand-controlled partner directory/API | uploaded PDF only, unverifiable certificate |
+| payment identity | merchant/account relation | processor merchant identity matches company | payment to unrelated person/wallet |
+| support identity | official support domain/channel | support portal controlled by verified company | pop-up phone number, remote tool demand |
+| software publisher | signing cert, download domain, package registry | code signing matches vendor | unsigned binary, raw-IP download |
+| social/marketplace | account age, verification, linkback | official profile links back to domain | fresh profile, no domain proof |
+
+#### Verification States
+
+```text
+unknown
+unverified
+weakly verified
+verified identity
+verified affiliation
+verified for specific action
+suspicious
+confirmed malicious
+revoked
+```
+
+Trust is scoped:
+
+```text
+verified for email does not mean verified for payment
+verified company does not mean authorized Microsoft support
+verified domain does not mean safe remote-access behavior
+verified app does not mean safe OAuth scopes
+```
+
+#### Proof Rules
+
+```text
+1. Every identity claim must point to an independent proof source.
+2. Proof from the claimant is a lead, not final proof.
+3. Brand affiliation must be verified from the brand's official source.
+4. Business identity must be verified from registry/business databases where possible.
+5. Domain ownership must be verified by DNS or official site control.
+6. Phone ownership must be verified by challenge or official source.
+7. Email identity must be domain-aligned and authenticated.
+8. Payment identity must match the legal/support identity.
+9. Trust decays over time and can be revoked.
+10. Dangerous behavior overrides identity proof.
+```
+
+#### Email Trust Checks
+
+```text
+SPF pass
+DKIM pass
+DMARC pass/aligned
+From domain matches claimed organization
+reply-to mismatch
+sender domain age
+sender domain reputation
+display-name brand impersonation
+link destination mismatch
+attachment/download risk
+email authentication result from headers when available
+```
+
+Email verdict examples:
+
+```text
+DMARC aligned + official domain + safe links -> stronger trust
+display name Microsoft + random sender domain -> risk
+reply-to free mailbox for company invoice -> risk
+authenticated email but link points to unrelated support domain -> inspect destination
+```
+
+#### Phone Trust Checks
+
+```text
+E.164 normalization
+line type
+carrier
+country/region
+first seen
+domains seen on
+brands claimed with
+official registry/domain match
+campaign graph reuse
+complaint/reputation source hits
+```
+
+Phone verdict examples:
+
+```text
+official domain publishes number -> weak positive
+number appears on 20 unrelated support pages -> strong risk
+number claims Microsoft and PayPal support on different domains -> strong risk
+phone + gift-card/remote-tool context -> block in Elder Safe
+```
+
+#### Company Trust Checks
+
+```text
+registered legal entity
+registration date
+active/dissolved state
+registered address
+directors/officers where public
+business identifiers: D-U-N-S, VAT, tax ID where appropriate
+domain ownership relation
+phone/email relation
+brand affiliation relation
+complaint/reputation history
+```
+
+Company verdict examples:
+
+```text
+old company + matching domain + official support portal -> trust contributor
+new company + major-brand support claim + no partner proof -> suspicious
+registered company + gift-card payment request -> block anyway
+```
+
+#### Action Trust Matrix
+
+The framework should answer:
+
+```text
+what is this identity allowed to safely ask the user to do?
+```
+
+| Action | Required Trust |
+|---|---|
+| read article | low |
+| collect email newsletter signup | low/medium |
+| ask for password | strong domain + identity + sink proof |
+| ask for bank/payment info | strong company/payment proof |
+| ask user to call support number | verified support channel |
+| ask user to install remote tool | verified support + explicit consent + guardian mode |
+| ask for gift card / crypto / wire | never trusted in support context |
+| ask for seed phrase | never trusted |
+| ask to disable security | never trusted unless enterprise-admin policy |
+
+#### Trust Decay And Revocation
+
+```text
+trust expires
+registry checks refresh
+phone/domain ownership changes downgrade trust
+new scam reports trigger review
+hard evidence revokes trust immediately
+verified-but-risky state can exist
+```
+
+#### Product Name Idea
+
+This can become a standalone XGenGuardian pillar:
+
+```text
+XGG TrustGraph
+XGG IdentityDossier
+XGG Verified Support Registry
+XGG ElderSafe Trust Firewall
+```
+
+The important product promise:
+
+```text
+Nothing is trusted because it exists online.
+Trust is earned, scoped, evidenced, and revocable.
+```
 
 ### 23.1 Health-Gated Protection
 
