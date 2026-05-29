@@ -635,6 +635,10 @@ func (s *Server) runPipelineWithTier(ctx context.Context, req checkRequest, tier
 	// this, rule tuning stays emotional.
 	for _, code := range resp.ReasonCodes {
 		metrics.RuleFiredTotal.WithLabelValues(code).Inc()
+		// Phase G — per-rule × per-final-verdict count. Lets the rule-
+		// health report distinguish "rule R contributed to BLOCK 80% of
+		// the time vs WARN 20%" rather than treating every fire equally.
+		metrics.RuleVerdictTotal.WithLabelValues(code, resp.Verdict).Inc()
 	}
 
 	tierLabel := "tier1_only"

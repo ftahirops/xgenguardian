@@ -146,6 +146,45 @@ var (
 		},
 		[]string{"engine"},
 	)
+
+	// Phase G — data flywheel.
+
+	// RuleVerdictTotal — per-reason-code × per-verdict count. Lets the
+	// weekly report compute "rule R contributed to BLOCK N times and WARN
+	// M times" instead of bucketing every fire equally. Differs from
+	// RuleFiredTotal (which only counts emissions): same code can fire
+	// twice in one Result (extremely rare) — verdict-axis here is the
+	// final verdict the user actually saw.
+	RuleVerdictTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "xgg_rule_verdict_total",
+			Help: "Per-rule per-verdict counts. code is the reason-code; verdict is the FINAL verdict on the response that included this code.",
+		},
+		[]string{"code", "verdict"},
+	)
+
+	// RuleOverrideTotal — incremented by /v1/telemetry/override when the
+	// user clicked "proceed anyway" on a WARN/BLOCK page. Labeled per
+	// reason code from the original verdict so we can see WHICH rule the
+	// user pushed past.
+	RuleOverrideTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "xgg_rule_override_total",
+			Help: "User override events by reason code (incremented once per code attached to the overridden verdict).",
+		},
+		[]string{"code"},
+	)
+
+	// RuleFPReportTotal — incremented by /v1/telemetry/override action=
+	// report_fp. The headline FP signal: someone explicitly flagged the
+	// verdict as wrong-positive.
+	RuleFPReportTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "xgg_rule_fp_report_total",
+			Help: "Operator/user false-positive reports by reason code.",
+		},
+		[]string{"code"},
+	)
 )
 
 // MustRegister registers all verdict-api metrics with the given registerer.
@@ -166,5 +205,8 @@ func MustRegister(r prometheus.Registerer) {
 		RuleFiredTotal,
 		ShadowDiffTotal,
 		ShadowLatency,
+		RuleVerdictTotal,
+		RuleOverrideTotal,
+		RuleFPReportTotal,
 	)
 }

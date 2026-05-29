@@ -61,6 +61,8 @@ type Server struct {
 //   - /v1/check            — PUBLIC (browser extension → verdict-api over internet)
 //   - /v1/rescan           — PUBLIC (browser extension rescan button)
 //   - /v1/command-check    — PUBLIC (content-script copy-button mediation)
+//   - /v1/telemetry/override — PUBLIC, opt-in via XGG_TELEMETRY_ENABLED;
+//                              extension/portal posts override + FP/FN reports
 //   - /v1/scan             — INTERNAL (scheduler only); requires X-Internal-Token
 //   - /v1/stream           — INTERNAL (SSE live feed); requires X-Internal-Token
 func (s *Server) Routes() http.Handler {
@@ -80,6 +82,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/check", s.rateLimitMiddleware(s.check))
 	mux.HandleFunc("/v1/rescan", s.rescan)
 	mux.HandleFunc("/v1/command-check", s.rateLimitMiddleware(s.commandCheck))
+
+	// Phase G — opt-in data-flywheel endpoint. Rate-limited like /v1/check.
+	// Opt-in is enforced inside the handler (telemetryEnabled).
+	mux.HandleFunc("/v1/telemetry/override", s.rateLimitMiddleware(s.telemetryOverride))
 
 	// Internal-only endpoints — require X-Internal-Token.
 	mux.Handle("/v1/scan", internalauth.Middleware(http.HandlerFunc(s.scan)))
