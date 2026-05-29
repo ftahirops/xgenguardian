@@ -19,10 +19,13 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog/log"
 
+	"github.com/xgenguardian/services/verdict-api/internal/connid"
 	"github.com/xgenguardian/services/verdict-api/internal/feeds"
+	"github.com/xgenguardian/services/verdict-api/internal/internalauth"
 	"github.com/xgenguardian/services/verdict-api/internal/oauthreg"
 	"github.com/xgenguardian/services/verdict-api/internal/rdap"
 	"github.com/xgenguardian/services/verdict-api/internal/registry"
@@ -37,6 +40,12 @@ type Server struct {
 	OAuthReg    *oauthreg.Cache       // optional; nil disables OAuth check
 	Tier1Budget time.Duration
 
+	// SharedHTTPClient is a connection-pooled HTTP client shared across all
+	// sandbox-render and visual-match calls. Initialize with NewSharedHTTPClient
+	// in main.go. When nil, postJSON falls back to a per-call client (no
+	// connection reuse — only acceptable in tests).
+	SharedHTTPClient *http.Client
+
 	// sandboxCoalescer dedups in-flight sandbox renders by normalized URL.
 	// Lazy-initialized on first use so tests that don't render don't
 	// need to instantiate. See coalesce.go.
@@ -44,17 +53,41 @@ type Server struct {
 	sandboxCoalescerOnce sync.Once
 }
 
+// Routes returns the HTTP handler for the verdict-api HTTP gateway.
+//
+// Endpoint classification:
+//   - /healthz             — public, no auth (operational probe)
+//   - /metrics             — public, no auth (Prometheus scrape target)
+//   - /v1/check            — PUBLIC (browser extension → verdict-api over internet)
+//   - /v1/rescan           — PUBLIC (browser extension rescan button)
+//   - /v1/command-check    — PUBLIC (content-script copy-button mediation)
+//   - /v1/scan             — INTERNAL (scheduler only); requires X-Internal-Token
+//   - /v1/stream           — INTERNAL (SSE live feed); requires X-Internal-Token
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.healthz)
-	mux.HandleFunc("/v1/check", s.check)
+
+	// Prometheus metrics endpoint — no authentication per standard scraping
+	// convention. The service binds 127.0.0.1:18080 and UFW restricts external
+	// access; operators should firewall /metrics if exposing on a public IP.
+	mux.Handle("/metrics", promhttp.Handler())
+
+	// Public endpoints — called by the browser extension from the internet;
+	// embedding a shared secret in extension code would be trivially extractable.
+	// /v1/check and /v1/command-check have per-client-id and per-IP rate limiting
+	// (Fix #13). /v1/rescan is not rate-limited (it requires a prior check result
+	// to exist and is already throttled by the 90s pipeline budget).
+	mux.HandleFunc("/v1/check", s.rateLimitMiddleware(s.check))
 	mux.HandleFunc("/v1/rescan", s.rescan)
-	mux.HandleFunc("/v1/scan",   s.scan)
-	mux.HandleFunc("/v1/stream", s.stream)
-	// Copy-button mediation endpoint: extension calls this on every copy
-	// from a code block. Must respond fast (<100ms target) — no sandbox,
-	// no DB writes, pure in-memory pattern matching + installreg lookup.
-	mux.HandleFunc("/v1/command-check", s.commandCheck)
+	mux.HandleFunc("/v1/command-check", s.rateLimitMiddleware(s.commandCheck))
+
+	// Internal-only endpoints — require X-Internal-Token.
+	mux.Handle("/v1/scan", internalauth.Middleware(http.HandlerFunc(s.scan)))
+	mux.Handle("/v1/stream", internalauth.Middleware(http.HandlerFunc(s.stream)))
+	// /v1/deep-scan is bandwidth-intensive (fans out to multiple sandbox renders).
+	// Requires X-Internal-Token — not exposed to the public extension API.
+	mux.Handle("/v1/deep-scan", internalauth.Middleware(http.HandlerFunc(s.deepScan)))
+
 	return cors(mux)
 }
 
@@ -80,6 +113,11 @@ type checkRequest struct {
 	// Maps to feed_entries.category. true = block in this category, false =
 	// allow. When not provided we use the mode's defaults.
 	Categories   map[string]bool `json:"categories,omitempty"`
+	// BrowserRemoteIP — IP the browser actually connected to, captured by
+	// chrome.webRequest.onResponseStarted in the extension. Phase B
+	// connection identity. Empty string = extension didn't capture it; the
+	// connection-identity path is then absent rather than failed.
+	BrowserRemoteIP string `json:"browser_remote_ip,omitempty"`
 }
 
 type checkResponse struct {
@@ -101,6 +139,45 @@ type checkResponse struct {
 	// IsChallengePage — sandbox saw a Cloudflare/Turnstile/captcha wall.
 	IsChallengePage   bool   `json:"is_challenge_page,omitempty"`
 	ScannedAt       time.Time `json:"scanned_at"`
+	// Cached — true when the response was served from the Redis verdict cache.
+	// Lets the extension / block page show "Last scanned X ago" using ScannedAt.
+	Cached bool `json:"cached,omitempty"`
+	// DomainAgeDays — registered-age of the domain in days (from RDAP). 0
+	// with DomainAgeKnown=false means we didn't look up or RDAP failed.
+	// Surfaced so the block page can render the "registered N days ago" badge.
+	DomainAgeDays  int  `json:"domain_age_days,omitempty"`
+	DomainAgeKnown bool `json:"domain_age_known,omitempty"`
+	// VendorDNSBlockedBy — names of the protective-DNS providers that
+	// blocked this domain. Empty means no provider blocked. Surfaced so
+	// the block page can show "Cloudflare + Quad9 both block this".
+	VendorDNSBlockedBy []string `json:"vendor_dns_blocked_by,omitempty"`
+	// ClearanceChecks — per-gate pass/warn/fail/unknown for the
+	// transparency grid the block page renders. Always populated. In Ultra
+	// mode it gates the verdict; in other modes it's informational only.
+	// Keys: feed, vendor_dns, domain_age, hostname_shape, visual, identity,
+	// behavior, trust.
+	ClearanceChecks map[string]string `json:"clearance_checks,omitempty"`
+	// ConnectionIdentity — Phase B evidence object answering "did the
+	// browser actually connect to a legitimate endpoint for this domain?"
+	// Absent (nil) when the extension didn't supply browser_remote_ip.
+	ConnectionIdentity *connid.Identity `json:"connection_identity,omitempty"`
+
+	// TrustScore — Phase D. Positive-evidence aggregate in [0.0, 1.0]
+	// combining domain age, feed/vendor-DNS cleanliness, brand/org
+	// membership, HTTPS validity. Surfaced for the evidence UI;
+	// suppresses soft signals only (never hard rules).
+	TrustScore float64 `json:"trust_score,omitempty"`
+	// TrustContributors — labeled signals that moved the score.
+	// Rendered in the evidence UI as "trust came from X, Y, Z."
+	TrustContributors []trustContributor `json:"trust_contributors,omitempty"`
+}
+
+// trustContributor is the wire-format mirror of policy.TrustContributor.
+// Kept here so the public JSON contract is owned by the gateway package
+// rather than leaking internal/policy types.
+type trustContributor struct {
+	Label  string  `json:"label"`
+	Weight float64 `json:"weight"`
 }
 
 type signal struct {
@@ -120,14 +197,22 @@ func (s *Server) check(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	// 90s deadline. Reasoning: Tier-2 sandbox-render has a real-world p95 of
+	// 15-20s and ours uses 45s timeout + 30s retry. The previous 8s parent
+	// deadline silently aborted every Tier-2 invocation, disabling visual-
+	// match / YARA / sink / behavior detection on the on-demand check path.
+	// Extension-side timeout is 25s (holding.html) so the engine still has
+	// budget to coalesce a slow scan while the user sees the manual-isolate
+	// escape on the holding page. The extra time allows the sandbox-render
+	// to actually complete and the policy engine to act on its evidence.
+	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
 
 	resp := s.runPipeline(ctx, req)
 
 	w.Header().Set("content-type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
-	log.Info().Str("url", req.URL).Str("verdict", resp.Verdict).Msg("check")
+	log.Info().Str("url", sanitizeURLForLog(req.URL)).Str("verdict", resp.Verdict).Msg("check")
 }
 
 func (s *Server) rescan(w http.ResponseWriter, r *http.Request) {
@@ -136,9 +221,13 @@ func (s *Server) rescan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req checkRequest
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.URL == "" {
+		http.Error(w, "bad request: url required", http.StatusBadRequest)
+		return
+	}
 	req.ForceRescan = true
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	// Same 90s budget — rescan is on-demand and benefits from a full Tier-2.
+	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
 	resp := s.runPipeline(ctx, req)
 	w.Header().Set("content-type", "application/json")

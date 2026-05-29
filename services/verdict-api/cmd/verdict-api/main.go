@@ -20,22 +20,27 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
 
+	"github.com/xgenguardian/services/verdict-api/internal/brandgraph"
 	"github.com/xgenguardian/services/verdict-api/internal/feeds"
 	"github.com/xgenguardian/services/verdict-api/internal/httpgw"
+	"github.com/xgenguardian/services/verdict-api/internal/metrics"
 	"github.com/xgenguardian/services/verdict-api/internal/oauthreg"
 	"github.com/xgenguardian/services/verdict-api/internal/rdap"
-	"github.com/xgenguardian/services/verdict-api/internal/brandgraph"
 	"github.com/xgenguardian/services/verdict-api/internal/registry"
 )
 
 func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+
+	// Register Prometheus metrics before anything else.
+	metrics.MustRegister(prometheus.DefaultRegisterer)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -118,16 +123,30 @@ func main() {
 	// Enabled by setting SESSION_LOG_DIR; used during internal testing.
 	httpgw.EnableSessionLog()
 
+	// Shared HTTP client for sandbox-render and visual-match calls.
+	// A single pooled transport avoids ephemeral-port exhaustion under load.
+	// Per-call timeouts are applied via context, not on the Client directly,
+	// so idle connections can be reused across calls.
+	sharedHTTPClient := &http.Client{
+		Transport: &http.Transport{
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 20,
+			IdleConnTimeout:     90 * time.Second,
+		},
+		// No Timeout here — per-request context deadline is used instead.
+	}
+
 	// HTTP gateway alongside gRPC.
 	httpAddr := env("HTTP_LISTEN", "127.0.0.1:18080")
 	gw := &httpgw.Server{
-		Pg:          pg,
-		Rdb:         rdb,
-		Brands:      brandsCache,
-		RDAP:        rdapClient,
-		WebRisk:     webRisk,
-		OAuthReg:    oauthCache,
-		Tier1Budget: svc.tier1Budget,
+		Pg:               pg,
+		Rdb:              rdb,
+		Brands:           brandsCache,
+		RDAP:             rdapClient,
+		WebRisk:          webRisk,
+		OAuthReg:         oauthCache,
+		Tier1Budget:      svc.tier1Budget,
+		SharedHTTPClient: sharedHTTPClient,
 	}
 	go func() {
 		log.Info().Str("addr", httpAddr).Msg("verdict-api HTTP listening")

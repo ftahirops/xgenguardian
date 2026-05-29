@@ -50,3 +50,35 @@ Data dependencies: Postgres (pgvector for embeddings), Redis (caching/queues), M
 - **Tasks workflow**: pick from `docs/tasks/TASKS.md`, reference with `Closes XGG-NN` in the PR. Design decisions go in `docs/issues/ISSUES.md`, not PR comments.
 - **Detection-logic PRs** are a higher merge bar: must include `make eval` output and not regress precision/recall/F1 below current values or break Phase-1 exit-gate criteria.
 - **Test fixtures**: never include real phishing URLs unless they are already-classified PhishTank entries. Use `phish-test.example`-style placeholders.
+
+## Three-tier trust policy (mandatory)
+
+Any PR touching `internal/trustreg/`, `internal/orggraph/`, or `internal/trustscore/` (Phase B) must declare which tier the entry belongs in. The PR template enforces this.
+
+- **Tier 0 — Hardcoded critical providers (~15)**: Google, Microsoft, Apple, GitHub, Stripe, PayPal, Cloudflare, top 3-5 OAuth providers, top 2-3 browser/security infrastructure brands. Hand-reviewed; never added under FP pressure.
+- **Tier 1 — Curated global impersonation targets (~500-800 eventual)**: top banks per major economy, top SaaS by login frequency, government portals, top universities, crypto exchanges, payment processors, major marketplaces. Adding requires explicit "this is a widely-impersonated phishing target" justification.
+- **Tier S — Organization graph (`orggraph`)**: same-organization mapping for cross-origin-counting purposes ONLY. Membership in orggraph does NOT imply trust. moviesanywhere.com being in the Disney org does not make it Tier-0 or Tier-1; it just means hidden anchors from moviesanywhere → disney.com don't count as cross-origin.
+
+**Tier 2 — User allowlist** is the OPTIONS-page textbox, per-user, in `chrome.storage.local`. The user maintains their own allowlist for sites they personally trust. Server-side trustreg never grows because of one user's FP.
+
+## Definition of a Real Fix
+
+Any PR that fixes a false positive or false negative must satisfy ALL six:
+
+1. Fixes the reported URL / case
+2. Fixes the entire class of similar URLs
+3. Does NOT require a per-domain trustreg override for the FP class addressed
+4. Adds a regression test (`policy_test.go`, `tier1_test.go`, corpus entry, or extension E2E)
+5. Does NOT weaken malicious detection (`make maturity-test-bench` shows 0 new FN)
+6. Explains which rule changed and why
+
+A patch that only adds a domain to trustreg is rejected unless that domain is a Tier-0 or Tier-1 entry per the policy above. The structural fix is always preferred.
+
+## Hard rules vs scored rules
+
+The verdict engine has two classes of rules:
+
+- **Hard rules** — short-circuit BLOCK. Confirmed malicious facts: high-confidence feed hit, 2+ vendor-DNS consensus, YARA known-malware match, raw IP + binary path, confirmed credential mirror, malicious shell-command IOC. These MUST stay as fail-stops. Trust score never suppresses them.
+- **Soft rules** — Phase D candidates for refactor into weighted risk deltas. `HIDDEN_MALICIOUS_LINK`, `RANDOM_HOSTNAME`, `OBFUSCATED_JS_DETECTED`, `HIDDEN_IFRAME_CROSS_ORIGIN`, `SUSPICIOUS_DOWNLOAD_OFFERED`. These emit a risk delta + a reason code; verdict comes from the threshold per mode.
+
+When in doubt, look at which side of the line a rule sits. Soft rules should consult trust score; hard rules ignore it.

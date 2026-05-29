@@ -1,0 +1,14 @@
+[Unit]
+Description=XGenGuardian evidence retention cleanup
+Documentation=file:///home/xgenguardian/code/docs/runbooks/retention.md
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile=-/etc/xgenguardian/cleanup.env
+ExecStart=/home/xgenguardian/code/scripts/cleanup-expired.sh
+ExecStart=/usr/bin/python3 /home/xgenguardian/code/scripts/cleanup-minio.py
+StandardOutput=journal
+StandardError=journal
+SuccessExitStatus=0

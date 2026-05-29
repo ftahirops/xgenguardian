@@ -32,10 +32,14 @@ import (
 
 	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/miekg/dns"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
+	"github.com/xgenguardian/services/resolver/internal/iledger"
+	resolvermetrics "github.com/xgenguardian/services/resolver/internal/metrics"
 	"github.com/xgenguardian/services/resolver/internal/rebind"
 )
 
@@ -246,6 +250,9 @@ func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
+	// Register Prometheus metrics before anything else.
+	resolvermetrics.MustRegister(prometheus.DefaultRegisterer)
+
 	// Write our PID where the blocklist-refresh systemd unit can find it,
 	// so it can send us SIGHUP after a successful fetch.
 	if pidPath := env("PID_FILE", "/run/xgg-resolver.pid"); pidPath != "" {
@@ -322,6 +329,21 @@ func main() {
 		}()
 	}
 
+	// --- Prometheus metrics HTTP listener ---
+	// Separate small HTTP server on METRICS_LISTEN (default 127.0.0.1:19053).
+	// Operators should firewall this port; the data is operational counters only.
+	metricsAddr := env("METRICS_LISTEN", "127.0.0.1:19053")
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/metrics", promhttp.Handler())
+	metricsMux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
+	metricsSrv := &http.Server{Addr: metricsAddr, Handler: metricsMux, ReadHeaderTimeout: 5 * time.Second}
+	go func() {
+		log.Info().Str("addr", metricsAddr).Msg("resolver metrics HTTP listening")
+		if err := metricsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Warn().Err(err).Msg("resolver metrics server failed")
+		}
+	}()
+
 	// SIGHUP → hot-reload Bloom filters from disk. Sent by the
 	// xgg-blocklists systemd service after a successful fetch.
 	hup := make(chan os.Signal, 1)
@@ -343,6 +365,63 @@ func main() {
 	if dohSrv != nil {
 		_ = dohSrv.Shutdown(ctx)
 	}
+	_ = metricsSrv.Shutdown(ctx)
+}
+
+// trustedProxies holds CIDRs whose immediate peers may set X-Forwarded-For.
+// Populated at startup from TRUSTED_PROXY_CIDRS (comma-separated). nil means
+// no proxies are trusted and X-Forwarded-For is always ignored (Audit Finding #7).
+var trustedProxies []*net.IPNet
+
+func init() {
+	raw := os.Getenv("TRUSTED_PROXY_CIDRS")
+	if raw == "" {
+		return
+	}
+	for _, c := range strings.Split(raw, ",") {
+		c = strings.TrimSpace(c)
+		if c == "" {
+			continue
+		}
+		_, n, err := net.ParseCIDR(c)
+		if err != nil {
+			log.Warn().Err(err).Str("cidr", c).Msg("TRUSTED_PROXY_CIDRS: skipping invalid entry")
+			continue
+		}
+		trustedProxies = append(trustedProxies, n)
+	}
+}
+
+// isTrusted reports whether host (bare IP string) falls within any trusted CIDR.
+func isTrusted(host string) bool {
+	if len(trustedProxies) == 0 {
+		return false
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	for _, n := range trustedProxies {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// clientIPFromRequest extracts the best client IP from an HTTP request.
+// X-Forwarded-For is only honoured when the immediate peer (RemoteAddr) is
+// in the TRUSTED_PROXY_CIDRS list; otherwise RemoteAddr is used directly.
+// This prevents untrusted callers from forging source IPs in the query log.
+func clientIPFromRequest(r *http.Request) string {
+	host, _, _ := net.SplitHostPort(r.RemoteAddr)
+	if isTrusted(host) {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			// First value is the original client per RFC 7239 convention.
+			return strings.TrimSpace(strings.Split(xff, ",")[0])
+		}
+	}
+	return host
 }
 
 // dnsHandler is the classic-DNS entrypoint. Reuses the same resolve()
@@ -356,7 +435,11 @@ func (r *Resolver) dnsHandler(w dns.ResponseWriter, q *dns.Msg) {
 	}
 	domain := strings.TrimSuffix(strings.ToLower(q.Question[0].Name), ".")
 	clientIP := remoteIP(w.RemoteAddr())
-	resp := r.resolve(context.Background(), q, domain, clientIP)
+	// 500ms deadline prevents a hung verdict-api call from stalling the
+	// classic-DNS goroutine indefinitely (Audit Finding #18).
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	resp := r.resolve(ctx, q, domain, clientIP)
 	_ = w.WriteMsg(resp)
 }
 
@@ -401,10 +484,7 @@ func (r *Resolver) handleDoH(w http.ResponseWriter, req *http.Request) {
 	}
 	domain := strings.TrimSuffix(strings.ToLower(msg.Question[0].Name), ".")
 
-	clientIP, _, _ := net.SplitHostPort(req.RemoteAddr)
-	if xf := req.Header.Get("x-forwarded-for"); xf != "" {
-		clientIP = strings.TrimSpace(strings.Split(xf, ",")[0])
-	}
+	clientIP := clientIPFromRequest(req)
 	resp := r.resolve(req.Context(), msg, domain, clientIP)
 	out, _ := resp.Pack()
 	w.Header().Set("content-type", "application/dns-message")
@@ -417,11 +497,48 @@ func (r *Resolver) resolve(ctx context.Context, q *dns.Msg, domain, clientIP str
 	used := "unknown"
 	cacheHit := false
 	sinkholed := false
+	var resp *dns.Msg
 	defer func() {
 		dur := time.Since(t0)
+		resolvermetrics.DNSLatency.Observe(dur.Seconds())
+		// Map verdict/response to rcode label.
+		rcode := "NOERROR"
+		if resp != nil {
+			switch resp.Rcode {
+			case dns.RcodeNameError:
+				rcode = "NXDOMAIN"
+			case dns.RcodeRefused:
+				rcode = "REFUSED"
+			case dns.RcodeServerFailure:
+				rcode = "SERVFAIL"
+			default:
+				rcode = dns.RcodeToString[resp.Rcode]
+				if rcode == "" {
+					rcode = "NOERROR"
+				}
+			}
+		}
+		resolvermetrics.DNSQueriesTotal.WithLabelValues(rcode).Inc()
 		log.Info().Str("domain", domain).Str("client", clientIP).Str("verdict", used).Bool("cache", cacheHit).Dur("dur", dur).Msg("resolved")
 		// Best-effort emit to the admin stream. Never block DNS on this.
 		go r.emitQueryLog(domain, q, clientIP, used, cacheHit, sinkholed, dur)
+		// Phase B.4: returned-IP ledger. Only write when we actually returned
+		// real A/AAAA records (not a sinkhole/NXDOMAIN). verdict-api reads
+		// this via internal/iledger to answer "did the browser connect to an
+		// IP we just told it to?" — the core of connection-identity scoring.
+		// Best-effort: a Redis failure must never affect DNS correctness.
+		if !sinkholed && resp != nil && len(resp.Answer) > 0 {
+			ips, ttl := extractAnswers(resp)
+			if len(ips) > 0 {
+				go func() {
+					ctx2, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+					defer cancel()
+					if err := iledger.Write(ctx2, r.cache, clientIP, domain, ips, ttl); err != nil {
+						log.Debug().Err(err).Str("domain", domain).Msg("iledger write failed (non-fatal)")
+					}
+				}()
+			}
+		}
 	}()
 
 	// Decision order (top wins):
@@ -440,14 +557,16 @@ func (r *Resolver) resolve(ctx context.Context, q *dns.Msg, domain, clientIP str
 	// 0) never_block — hand-curated, subdomain-suffix match.
 	if r.isNeverBlock(domain) {
 		used, cacheHit = "clean", true
-		return r.upstreamAnswer(q)
+		resp = r.upstreamAnswer(q)
+		return resp
 	}
 
 	// 1) strict_block — 2+ feeds or phishing/malware-tagged. Bloom + Redis exact.
 	if r.blockHas(domain) {
 		if r.cache.SIsMember(ctx, "blocklist:strict", domain).Val() {
 			used, cacheHit, sinkholed = "block", true, true
-			return r.nxdomain(q)
+			resp = r.nxdomain(q)
+			return resp
 		}
 	}
 
@@ -455,7 +574,8 @@ func (r *Resolver) resolve(ctx context.Context, q *dns.Msg, domain, clientIP str
 	if r.allowHas(domain) {
 		if r.cache.SIsMember(ctx, "allowlist:exact", domain).Val() {
 			used, cacheHit = "clean", true
-			return r.upstreamAnswer(q)
+			resp = r.upstreamAnswer(q)
+			return resp
 		}
 	}
 
@@ -463,7 +583,8 @@ func (r *Resolver) resolve(ctx context.Context, q *dns.Msg, domain, clientIP str
 	if r.blockHas(domain) {
 		if r.cache.SIsMember(ctx, "blocklist:weak", domain).Val() {
 			used = "warn"
-			return r.upstreamAnswer(q)
+			resp = r.upstreamAnswer(q)
+			return resp
 		}
 	}
 
@@ -473,17 +594,21 @@ func (r *Resolver) resolve(ctx context.Context, q *dns.Msg, domain, clientIP str
 		switch v {
 		case "clean":
 			used = "clean"
-			return r.upstreamAnswer(q)
+			resp = r.upstreamAnswer(q)
+			return resp
 		case "block":
 			used, sinkholed = "block", true
-			return r.nxdomain(q)
+			resp = r.nxdomain(q)
+			return resp
 		case "warn":
 			// WARN: still resolve normally so user can decide; flagged in dashboard.
 			used = "warn"
-			return r.upstreamAnswer(q)
+			resp = r.upstreamAnswer(q)
+			return resp
 		case "analyzing":
 			used, sinkholed = "analyzing", true
-			return r.nxdomain(q) // brief while async scan completes
+			resp = r.nxdomain(q) // brief while async scan completes
+			return resp
 		}
 	}
 
@@ -495,17 +620,18 @@ func (r *Resolver) resolve(ctx context.Context, q *dns.Msg, domain, clientIP str
 	switch verdict.kind {
 	case "block":
 		sinkholed = true
-		return r.nxdomain(q)
+		resp = r.nxdomain(q)
 	case "warn":
 		// WARN passes through to upstream — flagged but not blocked.
 		// Operator reviews in /admin/queries.
-		return r.upstreamAnswer(q)
+		resp = r.upstreamAnswer(q)
 	case "analyzing":
 		sinkholed = true
-		return r.nxdomain(q)
+		resp = r.nxdomain(q)
 	default:
-		return r.upstreamAnswer(q)
+		resp = r.upstreamAnswer(q)
 	}
+	return resp
 }
 
 // emitQueryLog pushes one record onto the Redis stream `xgg:dns`. The
@@ -570,15 +696,30 @@ func (r *Resolver) tier1Verdict(ctx context.Context, domain string) tier1Result 
 	})
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, r.cfg.VerdictAPIAddr+"/v1/check", bytes.NewReader(body))
 	req.Header.Set("content-type", "application/json")
+	// Attach the inter-service shared secret (Architecture Audit Finding #3).
+	// /v1/check is a public endpoint but we still send the token so that if it
+	// is later locked down (e.g. by a network policy that rate-limits public
+	// callers), resolver requests get priority routing. No token = dev mode;
+	// the header is simply omitted when XGG_INTERNAL_TOKEN is unset.
+	if tok := os.Getenv("XGG_INTERNAL_TOKEN"); tok != "" {
+		req.Header.Set("X-Internal-Token", tok)
+	}
 
 	client := &http.Client{Timeout: 280 * time.Millisecond}
-	resp, err := client.Do(req)
+	httpResp, err := client.Do(req)
 	if err != nil {
 		log.Warn().Err(err).Str("domain", domain).Msg("verdict-api unreachable; failing open")
+		// Classify timeout vs network error for metrics.
+		result := "error"
+		if strings.Contains(err.Error(), "context deadline exceeded") || strings.Contains(err.Error(), "timeout") {
+			result = "timeout"
+		}
+		resolvermetrics.VerdictAPICallsTotal.WithLabelValues(result).Inc()
 		return tier1Result{kind: "unknown", ttl: 0}
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
+	defer httpResp.Body.Close()
+	if httpResp.StatusCode >= 400 {
+		resolvermetrics.VerdictAPICallsTotal.WithLabelValues("error").Inc()
 		return tier1Result{kind: "unknown", ttl: 0}
 	}
 
@@ -586,9 +727,11 @@ func (r *Resolver) tier1Verdict(ctx context.Context, domain string) tier1Result 
 		Verdict    string  `json:"verdict"`
 		Confidence float64 `json:"confidence"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
+	if err := json.NewDecoder(httpResp.Body).Decode(&v); err != nil {
+		resolvermetrics.VerdictAPICallsTotal.WithLabelValues("error").Inc()
 		return tier1Result{kind: "unknown", ttl: 0}
 	}
+	resolvermetrics.VerdictAPICallsTotal.WithLabelValues("success").Inc()
 
 	switch strings.ToUpper(v.Verdict) {
 	case "BLOCK":
@@ -626,6 +769,32 @@ func (r *Resolver) upstreamAnswer(q *dns.Msg) *dns.Msg {
 		return r.nxdomain(q)
 	}
 	return resp
+}
+
+// extractAnswers walks msg.Answer and returns the A/AAAA addresses plus
+// the minimum TTL seen across them. Used by the iledger writer in
+// resolve()'s defer. Returns (nil, 0) if no A/AAAA records present.
+func extractAnswers(msg *dns.Msg) ([]string, uint32) {
+	if msg == nil {
+		return nil, 0
+	}
+	var ips []string
+	var minTTL uint32
+	for _, rr := range msg.Answer {
+		switch v := rr.(type) {
+		case *dns.A:
+			ips = append(ips, v.A.String())
+		case *dns.AAAA:
+			ips = append(ips, v.AAAA.String())
+		default:
+			continue
+		}
+		ttl := rr.Header().Ttl
+		if minTTL == 0 || ttl < minTTL {
+			minTTL = ttl
+		}
+	}
+	return ips, minTTL
 }
 
 func (r *Resolver) sinkhole(q *dns.Msg, ip string) *dns.Msg {

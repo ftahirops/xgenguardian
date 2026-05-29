@@ -34,7 +34,6 @@ services:
       /bin/sh -c "
       until /usr/bin/mc alias set local http://minio:9000 xggadmin xggadmin123; do sleep 1; done;
       /usr/bin/mc mb -p local/xgg-evidence || true;
-      /usr/bin/mc anonymous set download local/xgg-evidence;
       "
 
 volumes:

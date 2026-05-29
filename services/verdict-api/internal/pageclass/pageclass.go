@@ -62,6 +62,26 @@ func (c Class) IsSensitive() bool {
 	return false
 }
 
+// IsCredentialPage reports whether the page class collects credentials
+// or payment information from the user — login/password/MFA/OAuth/payment/
+// crypto/invoice. Use this (not IsSensitive) for rules that act on
+// credential-sink data, because Download and DeveloperToolInstallLure
+// pages don't collect credentials (they OFFER files / show commands)
+// and the credential-sink heuristics produce false positives there.
+//
+// Example: signal.org/download has download links to updates.signal.org
+// (cross-origin). IsSensitive=true → credential-sink rule fires →
+// CREDENTIAL_SINK_CROSS_ORIGIN false-positive. IsCredentialPage=false →
+// rule correctly skipped.
+func (c Class) IsCredentialPage() bool {
+	switch c {
+	case Login, PasswordStep, MFA, OAuthConsent, Payment, CryptoWithdrawal,
+		Invoice:
+		return true
+	}
+	return false
+}
+
 // IsDevToolInstallLure — convenience predicate, exported so the pipeline
 // can decide whether to force Tier-2 without re-walking class enums.
 func (c Class) IsDevToolInstallLure() bool {

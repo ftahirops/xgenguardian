@@ -19,8 +19,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 
+	"github.com/xgenguardian/services/verdict-api/internal/brandgraph"
 	"github.com/xgenguardian/services/verdict-api/internal/fusion"
-	"github.com/xgenguardian/services/verdict-api/internal/trustreg"
 )
 
 // urlHash — canonical key shared with /report/[id] lookups and the resolver
@@ -57,6 +57,7 @@ func persistScan(
 	pageClass string,
 	grade string,
 	tier1Score float64,
+	extras map[string]any,
 ) error {
 	if pg == nil || evidenceID == "" {
 		return nil // nothing to persist (test paths, schema-less runs)
@@ -64,10 +65,17 @@ func persistScan(
 
 	// Compose the signals JSON for the evidence row. We embed both the raw
 	// fusion signals (analyst view) and the canonical codes (user view).
-	signalsJSON, _ := json.Marshal(map[string]any{
+	// `extras` carries fields the portal-api evidence endpoint surfaces
+	// directly (vendor_dns_blocked_by, domain_age_days, etc.) so the block
+	// page can render them without a schema migration for every new field.
+	payload := map[string]any{
 		"signals": out.Signals,
 		"codes":   codes,
-	})
+	}
+	for k, v := range extras {
+		payload[k] = v
+	}
+	signalsJSON, _ := json.Marshal(payload)
 
 	formActions := []string{}
 	if render != nil {
@@ -310,7 +318,7 @@ func queryFeedHit(ctx context.Context, pg *pgxpool.Pool, rawurl, domain string) 
 	// must NOT blacklist the whole brand. The trustreg has a small curated
 	// list of major brands; everything else falls through to the broader
 	// (url OR domain) match below.
-	if isSharedHosting(domain) || trustreg.IsTrusted(domain) {
+	if isSharedHosting(domain) || brandgraph.IsAnyTrust(domain) {
 		rows, err = pg.Query(ctx, `
 			SELECT DISTINCT source, confidence, category FROM feed_entries
 			WHERE url = $1

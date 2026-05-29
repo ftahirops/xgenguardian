@@ -207,6 +207,136 @@ var registry = []Entry{
 			"x.com", "www.x.com",
 		},
 	},
+	// Signal (E2EE messenger) — adding because the soak test flagged
+	// signal.org/download for HIDDEN_MALICIOUS_LINK due to legit cross-
+	// origin footer + download-mirror links. Trustreg gates Stage F.4
+	// suppression for the whole entry.
+	{
+		Brand: "signal",
+		Hosts: []string{
+			"signal.org", "www.signal.org",
+			"updates.signal.org", "support.signal.org",
+		},
+		Suffixes: []string{".signal.org"},
+	},
+	// Mozilla — same logic; mozilla.org has tons of cross-origin nav links.
+	{
+		Brand: "mozilla",
+		Hosts: []string{
+			"mozilla.org", "www.mozilla.org",
+			"firefox.com", "www.firefox.com",
+			"addons.mozilla.org", "support.mozilla.org",
+		},
+		Suffixes: []string{".mozilla.org", ".firefox.com", ".mozilla.com"},
+	},
+	// Wikipedia / Wikimedia
+	{
+		Brand: "wikipedia",
+		Hosts: []string{
+			"wikipedia.org", "en.wikipedia.org", "www.wikipedia.org",
+			"wikimedia.org", "commons.wikimedia.org",
+		},
+		Suffixes: []string{".wikipedia.org", ".wikimedia.org"},
+	},
+	// Stack Overflow / Stack Exchange
+	{
+		Brand: "stackoverflow",
+		Hosts: []string{
+			"stackoverflow.com", "www.stackoverflow.com",
+			"stackexchange.com", "www.stackexchange.com",
+			"serverfault.com", "superuser.com",
+		},
+		Suffixes: []string{".stackoverflow.com", ".stackexchange.com"},
+	},
+	// Cloudflare (the cdn + DNS provider itself)
+	{
+		Brand: "cloudflare",
+		Hosts: []string{
+			"cloudflare.com", "www.cloudflare.com",
+			"dash.cloudflare.com", "developers.cloudflare.com",
+			"workers.cloudflare.com",
+		},
+		Suffixes: []string{".cloudflare.com"},
+	},
+	// Processing (open-source programming language / IDE)
+	{
+		Brand: "processing",
+		Hosts: []string{
+			"processing.org", "www.processing.org",
+			"download.processing.org",
+		},
+		Suffixes: []string{".processing.org"},
+	},
+	// Opencode.ai — AI coding tool the soak test surfaced
+	{
+		Brand: "opencode",
+		Hosts: []string{
+			"opencode.ai", "www.opencode.ai",
+			"app.opencode.ai", "api.opencode.ai",
+		},
+		Suffixes: []string{".opencode.ai"},
+	},
+	// Anthropic / Claude
+	{
+		Brand: "anthropic",
+		Hosts: []string{
+			"anthropic.com", "www.anthropic.com",
+			"claude.ai", "www.claude.ai",
+			"console.anthropic.com",
+		},
+		Suffixes: []string{".anthropic.com", ".claude.ai"},
+	},
+	// OpenAI / ChatGPT
+	{
+		Brand: "openai",
+		Hosts: []string{
+			"openai.com", "www.openai.com",
+			"chatgpt.com", "www.chatgpt.com",
+			"chat.openai.com", "platform.openai.com",
+		},
+		Suffixes: []string{".openai.com", ".chatgpt.com"},
+	},
+	// Stripe (payment processor — commonly POST destination on billing pages)
+	{
+		Brand: "stripe",
+		Hosts: []string{
+			"stripe.com", "www.stripe.com",
+			"dashboard.stripe.com", "checkout.stripe.com",
+			"api.stripe.com", "billing.stripe.com",
+		},
+		Suffixes: []string{".stripe.com", ".stripecdn.com"},
+	},
+	// Tier-1 impersonation targets (Disney+, Netflix, Spotify) — kept as
+	// principled entries because they ARE phished ("update your Disney+
+	// subscription", "Netflix payment failed"). The cross-origin-counter
+	// FP that originally drove these additions is now handled by orggraph
+	// without trustreg growth, so the SUFFIX entries that were added as
+	// FP shortcuts have been removed. The host entries remain.
+	//
+	// Membership in orggraph (same-org collapsing for cross-origin
+	// counting) is independent of trustreg membership (trust for
+	// fail-closed rules). A domain can be in one, both, or neither.
+	{
+		Brand: "disney",
+		Hosts: []string{
+			"disney.com", "www.disney.com",
+			"disneyplus.com", "www.disneyplus.com",
+			"hulu.com", "www.hulu.com",
+		},
+	},
+	{
+		Brand: "netflix",
+		Hosts: []string{
+			"netflix.com", "www.netflix.com",
+		},
+	},
+	{
+		Brand: "spotify",
+		Hosts: []string{
+			"spotify.com", "www.spotify.com",
+			"open.spotify.com", "accounts.spotify.com",
+		},
+	},
 	{
 		Brand: "tiktok",
 		Hosts: []string{
@@ -489,6 +619,8 @@ func init() {
 // Kept out of the curated `registry` so the public source code does
 // not leak per-operator infrastructure. A future Personal Profile
 // feature will replace this with a per-user YAML.
+//
+// Invalid entries are logged and skipped; they never cause startup failure.
 func loadLocalEntries() {
 	csv := os.Getenv("XGG_LOCAL_TRUSTED_HOSTS")
 	if csv == "" {
@@ -497,6 +629,13 @@ func loadLocalEntries() {
 	for _, raw := range strings.Split(csv, ",") {
 		s := strings.ToLower(strings.TrimSpace(raw))
 		if s == "" {
+			continue
+		}
+		if !isValidLocalEntry(s) {
+			// Log via fmt to avoid a zerolog import in this package.
+			// The caller (init) runs before the logger is configured anyway.
+			_ = s // warning surfaced below
+			logInvalidLocalEntry(s)
 			continue
 		}
 		if strings.HasPrefix(s, ".") {
@@ -508,6 +647,87 @@ func loadLocalEntries() {
 		}
 		hostMatchSet[s] = "local"
 	}
+}
+
+// isValidLocalEntry returns true when the entry passes structural validation.
+//
+// Rules for suffix entries (start with "."):
+//   - No wildcards ("*" is not supported — surface accidental misconfiguration).
+//   - At least 5 characters total (shortest meaningful suffix is ".a.bc" = 5).
+//   - At least 2 non-empty dot-separated segments after the leading dot, so
+//     ".com" (1 segment) and ".co.uk" (2 segments, but both short TLDs common
+//     in attacker-crafted values) are rejected; ".example.com" (2 real segments)
+//     is accepted. We require the second-to-last segment to have ≥2 characters
+//     to block constructs like ".a.com" or ".co.uk"-style over-broad suffixes.
+//
+// Rules for exact entries:
+//   - No spaces.
+//   - Must contain at least one dot (bare labels like "intranet" are not valid
+//     hostnames for internet-reachable trust decisions).
+//   - No wildcards.
+//   - Only valid hostname characters: letters, digits, hyphens, dots.
+func isValidLocalEntry(s string) bool {
+	if strings.Contains(s, "*") {
+		return false // wildcards not supported
+	}
+	if strings.Contains(s, " ") {
+		return false
+	}
+	if strings.HasPrefix(s, ".") {
+		// Suffix validation.
+		if len(s) < 5 {
+			return false // too short to be a meaningful suffix
+		}
+		// Strip the leading dot and split remaining segments.
+		inner := s[1:] // e.g. "example.com"
+		parts := strings.Split(inner, ".")
+		if len(parts) < 2 {
+			return false // only one segment after dot — e.g. ".com"
+		}
+		for _, p := range parts {
+			if p == "" {
+				return false // double-dot or trailing dot
+			}
+		}
+		// Reject suffixes where every label is short (≤3 chars). This catches
+		// public-suffix-only entries like ".co.uk", ".com.au", ".net.br" that
+		// would otherwise grant blanket trust to every domain under a major
+		// country TLD. A real organization-owned suffix has at least one
+		// distinctive label longer than 3 characters (e.g. ".example.com",
+		// ".amazon.co.uk"). This is a heuristic — operators wanting to
+		// trust short branded suffixes can fall back to exact hostnames.
+		allShort := true
+		for _, p := range parts {
+			if len(p) > 3 {
+				allShort = false
+				break
+			}
+		}
+		if allShort {
+			return false
+		}
+		return true
+	}
+	// Exact hostname validation.
+	if !strings.Contains(s, ".") {
+		return false // bare label without TLD
+	}
+	for _, c := range s {
+		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '.') {
+			return false
+		}
+	}
+	return true
+}
+
+// logInvalidLocalEntry emits a warning without importing zerolog into this
+// package (trustreg is low-level; importing a logger creates a cycle risk).
+// Uses fmt.Fprintf to stderr so it's visible in journald / docker logs.
+func logInvalidLocalEntry(e string) {
+	// Use the standard library only — no zerolog dependency in this package.
+	// The message format is consistent with zerolog's text output so log
+	// aggregators can pick it up alongside normal log lines.
+	_, _ = os.Stderr.WriteString(`{"level":"warn","msg":"XGG_LOCAL_TRUSTED_HOSTS: skipping invalid entry","entry":"` + e + `"}` + "\n")
 }
 
 // normalize — lowercase + strip trailing dot. Idempotent.

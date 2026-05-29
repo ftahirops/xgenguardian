@@ -1,0 +1,147 @@
+{
+  "timestamp": "2026-05-29T03:24:10.449394+00:00",
+  "per_label": {
+    "benign": {
+      "total": 556,
+      "errors": 405,
+      "fp_count": 8,
+      "fp_rate": 0.052980132450331126,
+      "allowed_count": 143,
+      "fp_urls": [
+        {
+          "url": "https://fastly.net/",
+          "verdict": "WARN",
+          "grade": "D",
+          "codes": [
+            "SUSPICIOUS_DOWNLOAD_OFFERED",
+            "HIDDEN_MALICIOUS_LINK"
+          ],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://wordpress.org/",
+          "verdict": "WARN",
+          "grade": "D",
+          "codes": [
+            "RANDOM_HOSTNAME",
+            "HIDDEN_MALICIOUS_LINK"
+          ],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://cloud.microsoft/",
+          "verdict": "WARN",
+          "grade": "D",
+          "codes": [
+            "HIDDEN_IFRAME_CROSS_ORIGIN",
+            "HIDDEN_MALICIOUS_LINK"
+          ],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://ntp.org/",
+          "verdict": "WARN",
+          "grade": "D",
+          "codes": [
+            "OVERLAY_CLICKJACK"
+          ],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://myfritz.net/",
+          "verdict": "BLOCK",
+          "grade": "F",
+          "codes": [
+            "CREDENTIAL_SINK_CROSS_ORIGIN"
+          ],
+          "page_class": "login"
+        },
+        {
+          "url": "https://zoom.us/",
+          "verdict": "WARN",
+          "grade": "D",
+          "codes": [
+            "HIDDEN_IFRAME_CROSS_ORIGIN",
+            "HIDDEN_MALICIOUS_LINK"
+          ],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://cloudflare-dns.com/",
+          "verdict": "BLOCK",
+          "grade": "F+",
+          "codes": [
+            "VENDOR_DNS_CONSENSUS_BLOCK"
+          ],
+          "page_class": "generic"
+        },
+        {
+          "url": "https://opera.com/",
+          "verdict": "WARN",
+          "grade": "D",
+          "codes": [
+            "HIDDEN_MALICIOUS_LINK"
+          ],
+          "page_class": "generic"
+        }
+      ]
+    },
+    "malicious": {
+      "total": 623,
+      "errors": 623,
+      "tp_count": 0,
+      "tp_rate": 0.0,
+      "fn_count": 0,
+      "fn_urls": []
+    }
+  },
+  "per_reason_code": {
+    "OVERLAY_CLICKJACK": {
+      "benign_hits": 1,
+      "malicious_hits": 0,
+      "signal_ratio": 0.0
+    },
+    "OFFICIAL_INSTALL_MATCH": {
+      "benign_hits": 3,
+      "malicious_hits": 0,
+      "signal_ratio": 0.0
+    },
+    "HIDDEN_IFRAME_CROSS_ORIGIN": {
+      "benign_hits": 2,
+      "malicious_hits": 0,
+      "signal_ratio": 0.0
+    },
+    "HIDDEN_MALICIOUS_LINK": {
+      "benign_hits": 5,
+      "malicious_hits": 0,
+      "signal_ratio": 0.0
+    },
+    "CREDENTIAL_SINK_CROSS_ORIGIN": {
+      "benign_hits": 1,
+      "malicious_hits": 0,
+      "signal_ratio": 0.0
+    },
+    "RANDOM_HOSTNAME": {
+      "benign_hits": 1,
+      "malicious_hits": 0,
+      "signal_ratio": 0.0
+    },
+    "VENDOR_DNS_CONSENSUS_BLOCK": {
+      "benign_hits": 1,
+      "malicious_hits": 0,
+      "signal_ratio": 0.0
+    },
+    "SUSPICIOUS_DOWNLOAD_OFFERED": {
+      "benign_hits": 1,
+      "malicious_hits": 0,
+      "signal_ratio": 0.0
+    }
+  },
+  "latency_ms": {
+    "count": 151,
+    "p50": 360,
+    "p95": 10292,
+    "p99": 14401,
+    "max": 14468
+  }
+}

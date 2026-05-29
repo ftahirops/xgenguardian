@@ -14,6 +14,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -24,12 +25,18 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/xgenguardian/services/verdict-api/internal/brandgraph"
+	"github.com/xgenguardian/services/verdict-api/internal/connid"
 	"github.com/xgenguardian/services/verdict-api/internal/fusion"
+	"github.com/xgenguardian/services/verdict-api/internal/iledger"
+	"github.com/xgenguardian/services/verdict-api/internal/internalauth"
+	"github.com/xgenguardian/services/verdict-api/internal/metrics"
 	"github.com/xgenguardian/services/verdict-api/internal/oauthreg"
 	"github.com/xgenguardian/services/verdict-api/internal/pageclass"
 	"github.com/xgenguardian/services/verdict-api/internal/policy"
 	"github.com/xgenguardian/services/verdict-api/internal/reasons"
 	"github.com/xgenguardian/services/verdict-api/internal/tier1"
+	"github.com/xgenguardian/services/verdict-api/internal/vendordns"
 )
 
 // yaraWeight converts a YARA rule's declared severity into a fusion weight.
@@ -108,6 +115,8 @@ func (s *Server) runPipeline(ctx context.Context, req checkRequest) checkRespons
 // "" (auto, the default for /v1/check), "light", "medium", "deep". The
 // scheduler passes "light"/"medium"/"deep" via /v1/scan.
 func (s *Server) runPipelineWithTier(ctx context.Context, req checkRequest, tierHint string) checkResponse {
+	pipelineStart := time.Now()
+
 	domain := domainFromURL(req.URL)
 	if domain == "" {
 		return checkResponse{
@@ -117,12 +126,29 @@ func (s *Server) runPipelineWithTier(ctx context.Context, req checkRequest, tier
 		}
 	}
 
+	// --- Verdict cache (Cache 1): check before running any pipeline logic ---
+	// ForceRescan and paranoid mode always bypass the cache.
+	if !req.ForceRescan {
+		if cached := getVerdictCache(ctx, s.Rdb, req.URL, req.Paranoid, req.Mode); cached != nil {
+			metrics.VerdictCacheTotal.WithLabelValues("hit").Inc()
+			metrics.VerdictLatency.WithLabelValues("cached").Observe(time.Since(pipelineStart).Seconds())
+			mode := req.Mode
+			if mode == "" {
+				mode = "normal"
+			}
+			metrics.VerdictTotal.WithLabelValues(cached.Verdict, mode).Inc()
+			return *cached
+		}
+	}
+	metrics.VerdictCacheTotal.WithLabelValues("miss").Inc()
+
 	in := fusion.Inputs{Domain: domain, URL: req.URL}
 
 	// --- Tier 1 (synchronous, ≤250ms) ---
 	t1ctx, cancel := context.WithTimeout(ctx, s.Tier1Budget)
 	t1 := tier1.Run(t1ctx, domain, s.keywords())
 	cancel()
+	metrics.Tier1Score.Observe(t1.Score)
 
 	for _, sig := range t1.Signals {
 		in.Tier1Signals = append(in.Tier1Signals, fusion.Signal{
@@ -134,15 +160,21 @@ func (s *Server) runPipelineWithTier(ctx context.Context, req checkRequest, tier
 	// RDAP populates DomainAge for the universal phishing rule's third clause.
 	// Web Risk + feed_entries populate fusion.Inputs.GSBClean / BlocklistHit.
 	//
-	// feedHit holds the tiered result. Mutated by exactly one goroutine
-	// (the feed-lookup one); the WaitGroup join below provides the
-	// happens-before for subsequent reads.
+	// Each goroutine writes ONLY to its own local variable, never to `in`
+	// directly. A single serial merge block after corroboratorsWG.Wait()
+	// copies all locals into `in`. This eliminates the data race between
+	// corroborator goroutines and the Tier-2 block that also mutates `in`
+	// while the corroborators are running.
 	var (
 		corroboratorsWG sync.WaitGroup
 		feedSources     []string
 		feedHit         FeedHit
+		vendorDNS       vendordns.ConsensusResult
+		// per-goroutine locals — written only by their respective goroutine
+		rdapAge      time.Duration
+		webRiskClean *bool
 	)
-	corroboratorsWG.Add(3)
+	corroboratorsWG.Add(4)
 	go func() {
 		defer corroboratorsWG.Done()
 		if s.RDAP == nil {
@@ -152,7 +184,19 @@ func (s *Server) runPipelineWithTier(ctx context.Context, req checkRequest, tier
 		defer c()
 		info, err := s.RDAP.Lookup(rdctx, domain)
 		if err == nil {
-			in.DomainAge = info.Age()
+			rdapAge = info.Age() // local; merged into in.DomainAge after Wait
+		}
+	}()
+	go func() {
+		defer corroboratorsWG.Done()
+		// Multi-vendor DNS consensus. Cached in Redis with 1h TTL — DNS
+		// blocklists change relatively slowly so we don't need to re-query
+		// 8 providers on every request to the same domain.
+		vt0 := time.Now()
+		vendorDNS = queryVendorDNSCached(ctx, s.Rdb, domain)
+		metrics.VendorDNSLatency.Observe(time.Since(vt0).Seconds())
+		if vendorDNS.Hit() {
+			metrics.VendorDNSBlockTotal.WithLabelValues(fmt.Sprintf("%d", len(vendorDNS.BlockedBy))).Inc()
 		}
 	}()
 	go func() {
@@ -164,27 +208,52 @@ func (s *Server) runPipelineWithTier(ctx context.Context, req checkRequest, tier
 		defer c()
 		cleanPtr, _, err := s.WebRisk.Lookup(wrctx, req.URL)
 		if err == nil {
-			in.GSBClean = cleanPtr
+			webRiskClean = cleanPtr // local; merged into in.GSBClean after Wait
 		}
 	}()
 	go func() {
 		defer corroboratorsWG.Done()
 		fctx, c := context.WithTimeout(ctx, 2*time.Second)
 		defer c()
-		hit, _ := queryFeedHit(fctx, s.Pg, req.URL, domain)
-		feedHit = hit
-		// BlocklistHit on Inputs stays as a "any hit" flag for the legacy
-		// fusion path. The new staged-policy decision below consults
-		// feedHit's tier breakdown directly.
-		if hit.Hit() {
-			in.BlocklistHit = true
-			feedSources = hit.Sources
-		}
+		feedHit, _ = queryFeedHit(fctx, s.Pg, req.URL, domain)
+		// feedHit is read only after Wait(); feedSources likewise.
 	}()
 
 	// --- Tier 2 (dispatch sandbox + visual-match) ---
 	// Skipped entirely for `light`; forced for `deep`; auto for `""` and `medium`.
-	runTier2 := tierHint != "light" && (tierHint == "deep" || tierHint == "medium" || shouldRunTier2(t1.Score, req.URL))
+	// Opener-driven escalation: when the navigation was opened FROM a known
+	// URL shortener (bit.ly etc.), the user clicked through an obfuscated
+	// link — we don't know what the original sharer intended. Force Tier-2
+	// on the landing page even when Tier-1 says fine, so we get the full
+	// visual + behavior signal stack. Shorteners themselves don't get
+	// suspicious-redirect-flagged because the redirect IS the service.
+	openerIsShortener := false
+	if req.OpenerURL != "" {
+		if h := domainFromURL(req.OpenerURL); h != "" && isURLShortener(h) {
+			openerIsShortener = true
+		}
+	}
+
+	// SHORTCUT 1 — the URL itself is a known URL shortener landing page
+	// (bit.ly home, t.co home). These don't get Tier-2 forced even when
+	// shouldRunTier2 says yes; the user will navigate AWAY in a moment
+	// (that's the whole point of a shortener) and the destination URL
+	// will go through the full pipeline. Spending 20s rendering bit.ly's
+	// home page just stalls the user.
+	//
+	// SHORTCUT 2 — the URL is on the trusted-identity registry AND no
+	// strong tier-1 signal fired. Trusted brands (signal.org, github.com,
+	// google.com) routinely have install-page-looking paths that force
+	// Tier-2 under shouldRunTier2's install-lure check. We don't need to
+	// re-render every signal.org/download visit — trustreg already
+	// vetted the host.
+	isShortenerLanding := isURLShortener(domain)
+	isTrustedHost := brandgraph.IsAnyTrust(domain)
+
+	forceTier2 := tierHint == "deep" || tierHint == "medium"
+	autoTier2 := shouldRunTier2(t1.Score, req.URL) || openerIsShortener
+	runTier2 := tierHint != "light" && (forceTier2 || (autoTier2 && !isShortenerLanding && !(isTrustedHost && t1.Score < 0.4)))
+
 
 	var render *renderResponse
 	// Direct-download fallback: when the URL points at a binary that
@@ -230,9 +299,38 @@ func (s *Server) runPipelineWithTier(ctx context.Context, req checkRequest, tier
 		// the second request clears. One retry doubles render success on
 		// flaky URLs without doubling load on healthy ones. fp-bench TP
 		// jumps ~10 pp absolute with this in place.
-		r, err := s.callSandboxWithRetry(ctx, req.URL)
-		if err != nil {
-			log.Warn().Err(err).Str("url", req.URL).Msg("sandbox call failed (after retry)")
+
+		// --- Render cache (Cache 2): check before calling sandbox ---
+		//
+		// ForceRescan + Paranoid both bypass the verdict cache; the render
+		// cache must follow the same rule. Otherwise a "force rescan" on a
+		// URL whose render was cached 3 hours ago re-runs Tier-1 + policy
+		// against STALE Tier-2 evidence (4h TTL), defeating the purpose of
+		// the rescan. Worst case: URL turned malicious 2h ago, ALLOW render
+		// is still cached, ForceRescan re-runs policy on the old clean DOM
+		// and confidently returns ALLOW again.
+		var r *renderResponse
+		var err error
+		var cached *renderResponse
+		if !req.ForceRescan && !req.Paranoid {
+			cached = getRenderCache(ctx, s.Rdb, req.URL, domain)
+		}
+		if cached != nil {
+			metrics.RenderCacheTotal.WithLabelValues("hit").Inc()
+			r = cached
+		} else {
+			metrics.RenderCacheTotal.WithLabelValues("miss").Inc()
+			r, err = s.callSandboxWithRetry(ctx, req.URL)
+			if err != nil {
+				log.Warn().Err(err).Str("url", sanitizeURLForLog(req.URL)).Msg("sandbox call failed (after retry)")
+				// Classify sandbox failure reason for metrics.
+				reason := classifySandboxError(err)
+				metrics.SandboxFailuresTotal.WithLabelValues(reason).Inc()
+			}
+			// Store render result in Redis for future requests (fail-open on error).
+			if err == nil && r != nil {
+				setRenderCache(s.Rdb, req.URL, domain, r)
+			}
 		}
 		if err == nil && r != nil {
 			render = r
@@ -311,6 +409,16 @@ func (s *Server) runPipelineWithTier(ctx context.Context, req checkRequest, tier
 	// Wait for the async corroborators before fusion so their signals land.
 	corroboratorsWG.Wait()
 
+	// Merge corroborator results into `in`. Done serially after the join so
+	// concurrent writes to in.DomainAge / in.GSBClean / in.BlocklistHit are
+	// impossible by construction.
+	in.DomainAge = rdapAge
+	in.GSBClean = webRiskClean
+	if feedHit.Hit() {
+		in.BlocklistHit = true
+		feedSources = feedHit.Sources
+	}
+
 	// fusion.Score still produces useful intermediates the policy engine
 	// consumes — VisualTopBrand, VisualTopScore, raw signals (which we
 	// surface to analysts in the response). The DECISION moves to
@@ -335,12 +443,17 @@ func (s *Server) runPipelineWithTier(ctx context.Context, req checkRequest, tier
 		confidence        float64
 		pageClass         string
 		grade             string
+		_clearance        map[string]string
+		// Phase D: trust score + contributors lifted out so the response
+		// assembly block can surface them in the evidence UI.
+		trustScore   float64
+		trustContrib []policy.TrustContributor
 	)
 	if useLegacyPolicy() {
 		finalVerdict, codes, blockReason, strictnessApplied, confidence, pageClass, grade =
 			legacyDecision(req, in, out, render, feedSources, oauthDec)
 	} else {
-		policyIn := buildPolicyInputs(req, in, out, render, feedSources, feedHit, oauthDec)
+		policyIn := buildPolicyInputs(req, in, out, render, feedSources, feedHit, oauthDec, vendorDNS)
 		policyOut := policy.Apply(policyIn)
 		finalVerdict = string(policyOut.Verdict)
 		codes = policyOut.ReasonCodes
@@ -349,6 +462,10 @@ func (s *Server) runPipelineWithTier(ctx context.Context, req checkRequest, tier
 		confidence = policyOut.Confidence
 		pageClass = string(policyIn.PageClass)
 		grade = chooseGrade(finalVerdict, confidence)
+		// Stash policy clearance checks for response assembly below.
+		_clearance = policyOut.ClearanceChecks
+		trustScore = policyIn.TrustScore
+		trustContrib = policyIn.TrustContributors
 	}
 
 	// Translate fusion signals to HTTP-API signals (raw for analysts).
@@ -365,7 +482,20 @@ func (s *Server) runPipelineWithTier(ctx context.Context, req checkRequest, tier
 	if evidenceID == "" {
 		evidenceID = newEvidenceID()
 	}
-	if err := persistScan(ctx, s.Pg, in, out, render, codes, evidenceID, finalVerdict, pageClass, grade, t1.Score); err != nil {
+	// Extras land in evidence.signals JSON so the portal-api evidence
+	// endpoint can surface them to the block page without a schema migration
+	// for every new field.
+	persistExtras := map[string]any{}
+	if vendorDNS.Hit() {
+		persistExtras["vendor_dns_blocked_by"] = vendorDNS.BlockedBy
+	}
+	if in.DomainAge > 0 {
+		persistExtras["domain_age_days"] = int(in.DomainAge.Hours() / 24)
+	}
+	if len(_clearance) > 0 {
+		persistExtras["clearance_checks"] = _clearance
+	}
+	if err := persistScan(ctx, s.Pg, in, out, render, codes, evidenceID, finalVerdict, pageClass, grade, t1.Score, persistExtras); err != nil {
 		log.Warn().Err(err).Str("url", req.URL).Msg("persist failed")
 		// Don't surface to the caller — verdict still returns; analytics will catch.
 	}
@@ -388,10 +518,74 @@ func (s *Server) runPipelineWithTier(ctx context.Context, req checkRequest, tier
 	if render != nil {
 		resp.ScreenshotURL = render.ScreenshotURL
 	}
+	// Surface domain age from RDAP so the block page can render
+	// "Registered N days ago" badges.
+	if in.DomainAge > 0 {
+		resp.DomainAgeKnown = true
+		resp.DomainAgeDays = int(in.DomainAge.Hours() / 24)
+	}
+	if vendorDNS.Hit() {
+		resp.VendorDNSBlockedBy = vendorDNS.BlockedBy
+	}
+	if len(_clearance) > 0 {
+		resp.ClearanceChecks = _clearance
+	}
+	// Phase D: surface the trust score + contributors so the evidence UI
+	// can show *why* a verdict softened or didn't. Always populated (even
+	// at zero) so the UI always has a slot to render.
+	resp.TrustScore = trustScore
+	if len(trustContrib) > 0 {
+		out := make([]trustContributor, 0, len(trustContrib))
+		for _, c := range trustContrib {
+			out = append(out, trustContributor{Label: c.Label, Weight: c.Weight})
+		}
+		resp.TrustContributors = out
+	}
+	// Phase B: surface connection identity to the response when the extension
+	// supplied browser_remote_ip. Compares the browser's actual remote IP
+	// against the XGG resolver's returned-IP ledger (Phase B.4) and emits
+	// USER_DNS_PATH_MATCH / USER_DNS_PATH_MISMATCH / EXPECTED_RESOLVER_BYPASSED.
+	//
+	// Note: these are informational signals on this response, NOT verdict-
+	// changing. The verdict-changing hard rule (PUBLIC_DOMAIN_PRIVATE_IP) is
+	// already enforced upstream in policy.Apply. ASN-based CDN_ASN_MATCH /
+	// MISMATCH and TLS_IDENTITY_MISMATCH land in Phase B.5b once we have
+	// ASN/TLS data sources.
+	if req.BrowserRemoteIP != "" {
+		id := &connid.Identity{
+			Domain:          domain,
+			BrowserRemoteIP: req.BrowserRemoteIP,
+		}
+		// Ledger comparison. Best-effort: a Redis miss doesn't change the
+		// verdict — connection identity is then simply "absent" on that
+		// dimension, not "failed."
+		ledgerCtx, ledgerCancel := context.WithTimeout(ctx, 50*time.Millisecond)
+		ledgerEntries, ledgerErr := iledger.Recent(ledgerCtx, s.Rdb, req.ClientID, domain)
+		ledgerCancel()
+		if ledgerErr != nil {
+			log.Debug().Err(ledgerErr).Str("domain", domain).Msg("iledger read failed; treating as cold")
+		}
+		ledgerInput := connid.CompareInput{
+			BrowserRemoteIP:       req.BrowserRemoteIP,
+			ClientOptedIntoXGGDNS: false, // Phase B.5b: derive from request once the extension signals it
+		}
+		for _, e := range ledgerEntries {
+			ledgerInput.LedgerEntries = append(ledgerInput.LedgerEntries, connid.LedgerEntry{IP: e.IP})
+			id.XGGResolverIPsForClient = append(id.XGGResolverIPsForClient, e.IP)
+		}
+		cmp := connid.CompareLedger(ledgerInput)
+		id.DNSPathConsistent = cmp.DNSPathConsistent
+		for _, c := range cmp.ReasonCodes {
+			resp.ReasonCodes = append(resp.ReasonCodes, string(c))
+			metrics.RuleFiredTotal.WithLabelValues(string(c)).Inc()
+		}
+		resp.ConnectionIdentity = id
+	}
 
 	event := map[string]any{
 		"ts":               resp.ScannedAt,
-		"url":              req.URL,
+		"url":              sanitizeURLForLog(req.URL), // strip query/fragment (tokens, passwords, OAuth state)
+		"url_host":         domain,                    // analytics-friendly host grouping
 		"domain":           domain,
 		"verdict":          resp.Verdict,
 		"confidence":       resp.Confidence,
@@ -410,10 +604,106 @@ func (s *Server) runPipelineWithTier(ctx context.Context, req checkRequest, tier
 	// Append to the on-disk session log if SESSION_LOG_DIR is set.
 	writeSessionLog(event)
 
+	// --- Verdict cache write (Cache 1): store result for future requests ---
+	// Use context.Background() so a cancelled request context doesn't prevent
+	// the cache write from completing.
+	setVerdictCache(s.Rdb, req.URL, req.Paranoid, req.Mode, resp)
+
+	// --- Metrics: emit verdict counter + pipeline latency ---
+	mode := req.Mode
+	if mode == "" {
+		mode = "normal"
+	}
+	metrics.VerdictTotal.WithLabelValues(resp.Verdict, mode).Inc()
+
+	// Per-rule emission counter (Phase A). Every reason code on the final
+	// verdict bumps xgg_rule_fired_total{code=<CODE>}. This is the baseline
+	// signal for the rule-health report: when paired with
+	// xgg_rule_override_total (TODO from extension telemetry pipeline) it
+	// surfaces which rules cause the most user overrides per fire. Without
+	// this, rule tuning stays emotional.
+	for _, code := range resp.ReasonCodes {
+		metrics.RuleFiredTotal.WithLabelValues(code).Inc()
+	}
+
+	tierLabel := "tier1_only"
+	if resp.Cached {
+		tierLabel = "cached"
+	} else if runTier2 {
+		tierLabel = "tier2"
+	}
+	metrics.VerdictLatency.WithLabelValues(tierLabel).Observe(time.Since(pipelineStart).Seconds())
+
 	return resp
 }
 
+// classifySandboxError maps a sandbox call error to a reason label for metrics.
+func classifySandboxError(err error) string {
+	if err == nil {
+		return "other"
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "context deadline exceeded") || strings.Contains(msg, "timeout"):
+		return "timeout"
+	case strings.Contains(msg, "502"):
+		return "502"
+	case strings.Contains(msg, "connection refused") || strings.Contains(msg, "no such host"):
+		return "unreachable"
+	case strings.Contains(msg, "401") || strings.Contains(msg, "Unauthorized"):
+		return "auth"
+	default:
+		return "other"
+	}
+}
+
 // --- Tier-2 helpers ---
+
+// --- Phase 6 DOM-inventory finding types ---
+// These mirror sandbox-render's new RenderResponse fields; the parallel
+// agent owns their population; we own policy consumption.
+
+type linkFinding struct {
+	URL             string `json:"url"`
+	Text            string `json:"text,omitempty"`
+	Visible         bool   `json:"visible"`
+	SameOrigin      bool   `json:"same_origin"`
+	Extension       string `json:"extension,omitempty"`
+	IsRiskyDownload bool   `json:"is_risky_download"`
+	Rel             string `json:"rel,omitempty"`
+	TargetBlank     bool   `json:"target_blank"`
+	HasDownloadAttr bool   `json:"has_download_attr"`
+}
+
+type iframeFinding struct {
+	Src           string `json:"src"`
+	SameOrigin    bool   `json:"same_origin"`
+	Visible       bool   `json:"visible"`
+	Sandbox       string `json:"sandbox,omitempty"`
+	SrcdocSnippet string `json:"srcdoc_snippet,omitempty"`
+	Dimensions    []int  `json:"dimensions,omitempty"` // [w, h]
+}
+
+type hiddenElementFinding struct {
+	Tag             string `json:"tag"`
+	Reason          string `json:"reason"`
+	HrefOrSrc       string `json:"href_or_src,omitempty"`
+	InnerTextSample string `json:"inner_text_sample,omitempty"`
+}
+
+type suspiciousJSFinding struct {
+	Indicator   string `json:"indicator"`
+	Detail      string `json:"detail,omitempty"`
+	ScriptIndex int    `json:"script_index"`
+}
+
+type overlayFinding struct {
+	ZIndex           int    `json:"z_index"`
+	CoveragePct      int    `json:"coverage_pct"`
+	Transparent      bool   `json:"transparent"`
+	InterceptsClicks bool   `json:"intercepts_clicks"`
+	HrefOrListener   string `json:"href_or_listener,omitempty"`
+}
 
 type renderResponse struct {
 	EvidenceID       string            `json:"evidence_id"`
@@ -432,11 +722,17 @@ type renderResponse struct {
 	PostMessageCount int               `json:"post_message_count"`
 	// Sink — runtime credential-sink data (Package 4 / dev spec §3).
 	// Mirrors the JS-side window.__xgg_sink shape.
-	Sink             sinkObservation   `json:"sink"`
+	Sink             sinkObservation     `json:"sink"`
 	// ShellCmd — IOCs extracted from <pre>/<code> blocks on docs-style
 	// pages. Used to catch the Straiker-class "docs page IS the weapon"
 	// attack where the malicious payload is just text in the page.
 	ShellCmd         shellCmdObservation `json:"shellcmd"`
+	// Phase 6 DOM inventory — populated by sandbox-render's new extractor.
+	Links          []linkFinding          `json:"links,omitempty"`
+	IFrames        []iframeFinding        `json:"iframes,omitempty"`
+	HiddenElements []hiddenElementFinding `json:"hidden_elements,omitempty"`
+	SuspiciousJS   []suspiciousJSFinding  `json:"suspicious_js,omitempty"`
+	Overlays       []overlayFinding       `json:"overlays,omitempty"`
 }
 
 // shellCmdObservation — mirrors sandbox-render's shellcmd dict.
@@ -550,7 +846,7 @@ func (s *Server) callSandbox(ctx context.Context, target string) (*renderRespons
 	body, _ := json.Marshal(map[string]any{"url": target})
 	// Inner HTTP timeout aligned with the outer ctx budget (45s). Was 6s,
 	// which clamped every sandbox call below the actual p50.
-	r, err := postJSON(ctx, sandboxRenderURL()+"/render", body, 45*time.Second)
+	r, err := s.postJSON(ctx, sandboxRenderURL()+"/render", body, 45*time.Second)
 	if err != nil {
 		return nil, err
 	}
@@ -587,7 +883,7 @@ func (s *Server) callVisualMatch(ctx context.Context, screenshotURL string) (*ma
 	body, _ := json.Marshal(map[string]any{"image_url": screenshotURL})
 	// Inner HTTP timeout matches the outer ctx budget. Was 3s, raised to 15s
 	// after fp-bench surfaced silent timeouts on CPU-CLIP inference.
-	r, err := postJSON(ctx, visualMatchURL()+"/match", body, 15*time.Second)
+	r, err := s.postJSON(ctx, visualMatchURL()+"/match", body, 15*time.Second)
 	if err != nil {
 		return nil, err
 	}
@@ -598,11 +894,29 @@ func (s *Server) callVisualMatch(ctx context.Context, screenshotURL string) (*ma
 	return &mr, nil
 }
 
-func postJSON(ctx context.Context, url string, body []byte, timeout time.Duration) ([]byte, error) {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(body)))
+// postJSON sends a JSON POST to url and returns the response body.
+// Timeout is applied via context.WithTimeout on the request so the
+// shared client's transport can reuse connections across calls.
+func (s *Server) postJSON(ctx context.Context, url string, body []byte, timeout time.Duration) ([]byte, error) {
+	// Apply per-call timeout via context rather than on the Client itself,
+	// which allows the shared transport to reuse idle connections.
+	rctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	req, _ := http.NewRequestWithContext(rctx, http.MethodPost, url, strings.NewReader(string(body)))
 	req.Header.Set("content-type", "application/json")
-	client := &http.Client{Timeout: timeout}
-	resp, err := client.Do(req)
+	// Attach the inter-service shared secret so sandbox-render and visual-match
+	// can validate that requests originate from verdict-api (Audit Finding #3).
+	internalauth.AddToken(req)
+
+	// Use the shared pooled client when available; fall back to a per-call
+	// client only in tests where SharedHTTPClient is not initialised.
+	httpClient := s.SharedHTTPClient
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: timeout}
+	}
+
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -610,7 +924,10 @@ func postJSON(ctx context.Context, url string, body []byte, timeout time.Duratio
 	if resp.StatusCode >= 400 {
 		return nil, errors.New(resp.Status)
 	}
-	return io.ReadAll(resp.Body)
+	// A legitimate sandbox response is typically 50-200 KB; 4 MB is well above
+	// any plausible response. Anything larger is a misbehaving upstream or an
+	// attack attempting to OOM the verdict-api process.
+	return io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024))
 }
 
 // --- pure helpers ---
@@ -632,6 +949,16 @@ func shouldRunTier2(t1Score float64, raw string) bool {
 	// content site uses a domain. Direct IP hits are commodity malware drops,
 	// Mirai-style botnet binaries, or attacker-controlled C2. Always Tier-2.
 	if isRawIPHost(raw) {
+		return true
+	}
+	// Page-class-driven force: any URL whose path matches a sensitive page
+	// class (login/payment/oauth/mfa/admin/install-lure) MUST run Tier-2
+	// even when Tier-1 score is low. Without this we get the
+	// SENSITIVE_PAGE_VERIFICATION_UNAVAILABLE ISOLATE class on every
+	// legitimate /billing /checkout /oauth /mfa URL with a calm Tier-1
+	// signal. The string-pattern list below covers a SUBSET; the
+	// pageclass module is the authoritative classifier.
+	if pageclass.FromURL(raw).IsSensitive() {
 		return true
 	}
 	// Developer-tool install lures: URL looks like /docs or /install for

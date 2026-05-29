@@ -5,10 +5,10 @@
 -- (50-500 entries) without needing another ANN index.
 
 ALTER TABLE brand_screenshots
-  ADD COLUMN phash TEXT,
-  ADD COLUMN dhash TEXT;
+  ADD COLUMN IF NOT EXISTS phash TEXT,
+  ADD COLUMN IF NOT EXISTS dhash TEXT;
 
 -- Index for fast filtering once populated. Both hashes are 16-char hex
 -- strings (64-bit) for ImageHash's default pHash/dHash output.
-CREATE INDEX idx_brand_screenshots_phash ON brand_screenshots (phash) WHERE phash IS NOT NULL;
-CREATE INDEX idx_brand_screenshots_dhash ON brand_screenshots (dhash) WHERE dhash IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_brand_screenshots_phash ON brand_screenshots (phash) WHERE phash IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_brand_screenshots_dhash ON brand_screenshots (dhash) WHERE dhash IS NOT NULL;

@@ -68,3 +68,6 @@ tools/brand-seeder/manual/*
 # CI / coverage
 coverage.txt
 coverage.html
+
+# Chrome extension auto-generated indexed rulesets (regenerated on load)
+apps/extension/_metadata/

@@ -1,0 +1,14 @@
+[Unit]
+Description=XGenGuardian Postgres backup
+Documentation=file:///home/xgenguardian/code/docs/runbooks/postgres-backup.md
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile=-/etc/xgenguardian/backup.env
+ExecStart=/home/xgenguardian/code/scripts/pg-backup.sh
+StandardOutput=journal
+StandardError=journal
+# Fail the unit if the script exits non-zero
+SuccessExitStatus=0

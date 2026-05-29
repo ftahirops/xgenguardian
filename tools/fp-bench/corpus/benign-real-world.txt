@@ -1,0 +1,57 @@
+# Category: benign-real-world
+# Last refreshed: 2026-05-29
+# Source: v0.3.2 soak test corpus + post-Phase-7 stabilization corrections
+
+# Mainstream brands
+https://www.google.com/
+https://www.youtube.com/
+https://github.com/
+https://www.microsoft.com/
+https://www.apple.com/
+https://www.amazon.com/
+https://en.wikipedia.org/wiki/Main_Page
+https://stackoverflow.com/
+https://www.cloudflare.com/
+
+# OAuth providers (must bypass via WELL_KNOWN_AUTH_HOSTS)
+https://accounts.google.com/
+https://login.microsoftonline.com/
+https://appleid.apple.com/
+
+# Payment safety
+https://www.paypal.com/
+
+# URL shorteners
+https://bit.ly/
+https://t.co/
+
+# Heavy-JS sites that historically false-positived on obfuscated-JS rule
+https://twitter.com/
+
+# v0.3.1 FP, fixed by adding to trustreg
+https://signal.org/download/
+https://processing.org/download/
+https://www.mozilla.org/
+
+# v0.3.1 FP (CREDENTIAL_SINK_CROSS_ORIGIN on legit billing page)
+# fixed by IsCredentialPage gate + Stripe in trustreg
+# https://opencode.ai/workspace/wrk_X/billing
+
+# Phase-A FP: multi-brand corporate homepage with cross-origin hidden
+# anchors to sister brands. Pre-orggraph, this WARN'd with
+# HIDDEN_MALICIOUS_LINK because 6+ hidden anchors pointed to
+# disney.com / hulu.com / espn.com / marvel.com.
+# Fixed STRUCTURALLY in Phase A.1 by orggraph.SameOrgHosts — Disney owns
+# all those brands so they don't count as cross-origin. The fix removes
+# trustreg suffix entries that were added as FP shortcuts and replaces
+# them with a single Disney org entry.
+https://moviesanywhere.com/home
+https://www.hulu.com/
+https://espn.com/
+https://marvel.com/
+
+# Phase-A FP: long English-compound hostname tripped random_host
+# heuristic (consonant runs + bigram diversity). Fixed by requiring
+# pillar 1 (low vowel ratio) for random_host to fire — English compounds
+# have ~38% vowels, real random strings have <20%.
+# https://moviesanywhere.com/  ← same URL as above; double-fixed

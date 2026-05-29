@@ -3,7 +3,7 @@
 -- Read by:      services/verdict-api during fusion (sets BlocklistHit on Inputs)
 -- See:          docs/UNIFIED-PLAN.md §18.2
 
-CREATE TABLE feed_entries (
+CREATE TABLE IF NOT EXISTS feed_entries (
   id            BIGSERIAL PRIMARY KEY,
   source        TEXT NOT NULL,                  -- 'urlhaus' | 'phishtank' | 'openphish'
   url           TEXT NOT NULL,
@@ -14,6 +14,6 @@ CREATE TABLE feed_entries (
   last_seen     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (source, url)
 );
-CREATE INDEX idx_feed_entries_url    ON feed_entries (url);
-CREATE INDEX idx_feed_entries_domain ON feed_entries (domain);
-CREATE INDEX idx_feed_entries_recent ON feed_entries (last_seen DESC);
+CREATE INDEX IF NOT EXISTS idx_feed_entries_url    ON feed_entries (url);
+CREATE INDEX IF NOT EXISTS idx_feed_entries_domain ON feed_entries (domain);
+CREATE INDEX IF NOT EXISTS idx_feed_entries_recent ON feed_entries (last_seen DESC);

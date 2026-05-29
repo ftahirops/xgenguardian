@@ -56,7 +56,9 @@ if command -v migrate >/dev/null 2>&1; then
   ok "migrate up"
 else
   warn "golang-migrate not installed; applying with psql instead"
-  for f in $(ls migrations/*.sql | sort); do
+  # Run only the .up.sql files (skip the .down.sql) — matches the
+  # golang-migrate convention introduced in the Phase 2 audit fix.
+  for f in $(ls migrations/*.up.sql | sort); do
     docker compose exec -T postgres psql -U xgg -d xgg < "$f" >/dev/null
     ok "applied $f"
   done

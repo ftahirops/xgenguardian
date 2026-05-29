@@ -7,7 +7,7 @@
 --
 -- Seed with Microsoft "verified publisher" + Google's vetted OAuth catalogue.
 -- See seeds in tools/brand-seeder/oauth_clients.yaml (or operator-supplied).
-CREATE TABLE oauth_clients (
+CREATE TABLE IF NOT EXISTS oauth_clients (
   id                BIGSERIAL PRIMARY KEY,
   provider          TEXT NOT NULL,                    -- 'microsoft' | 'google' | 'github' | ...
   client_id         TEXT NOT NULL,                    -- the OAuth client_id seen in the consent URL
@@ -19,5 +19,5 @@ CREATE TABLE oauth_clients (
   created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (provider, client_id)
 );
-CREATE INDEX idx_oauth_clients_provider_client ON oauth_clients (provider, client_id);
-CREATE INDEX idx_oauth_clients_trust ON oauth_clients (trust_level);
+CREATE INDEX IF NOT EXISTS idx_oauth_clients_provider_client ON oauth_clients (provider, client_id);
+CREATE INDEX IF NOT EXISTS idx_oauth_clients_trust ON oauth_clients (trust_level);

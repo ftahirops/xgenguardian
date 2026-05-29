@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xgenguardian.internal/schemas/brands.schema.json",
+  "title": "XGenGuardian Brand Registry",
+  "description": "Schema for tools/brand-seeder/brands.yaml. Validated in CI on every change. See docs/runbooks/brand-registry.md.",
+  "type": "object",
+  "required": ["brands"],
+  "additionalProperties": false,
+  "properties": {
+    "brands": {
+      "type": "array",
+      "description": "Ordered list of brand definitions seeded into the Brand Registry.",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/brand"
+      }
+    }
+  },
+  "$defs": {
+    "brand": {
+      "type": "object",
+      "description": "A single brand monitored for impersonation.",
+      "required": ["name", "canonical_domains"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Human-readable brand name used as the primary key in the brands table.",
+          "minLength": 1
+        },
+        "canonical_domains": {
+          "type": "array",
+          "description": "Domains the brand legitimately owns. Used for impersonation detection.",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 3
+          }
+        },
+        "login_urls": {
+          "type": "array",
+          "description": "Seed URLs for the sandbox-render screenshotter.",
+          "items": {
+            "type": "string",
+            "pattern": "^https?://"
+          }
+        },
+        "keywords": {
+          "type": "array",
+          "description": "Keywords for fuzzy domain matching (brand typo-squatting detection).",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expected_issuer": {
+          "type": "string",
+          "description": "Expected TLS certificate issuer CA short-name (e.g. DigiCert, Let's Encrypt). Used in mis-issuance signal.",
+          "minLength": 1
+        },
+        "legitimate_asns": {
+          "type": "array",
+          "description": "ASNs legitimately used by this brand. Any hosting outside these triggers an infra-mismatch signal.",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "legitimate_issuers": {
+          "type": "array",
+          "description": "Alternative form of issuer allow-list (multi-issuer brands).",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "manual_screenshots": {
+          "type": "array",
+          "description": "Fallback screenshots for pages that block headless rendering.",
+          "items": {
+            "$ref": "#/$defs/manual_screenshot"
+          }
+        }
+      }
+    },
+    "manual_screenshot": {
+      "type": "object",
+      "description": "A manually captured screenshot used when auto-rendering fails.",
+      "required": ["page_label", "file"],
+      "additionalProperties": false,
+      "properties": {
+        "page_label": {
+          "type": "string",
+          "description": "Logical page label matching label_of() in seed.py (login | home | checkout).",
+          "enum": ["login", "home", "checkout"]
+        },
+        "page_url": {
+          "type": "string",
+          "description": "Canonical URL of the page the screenshot represents.",
+          "pattern": "^https?://"
+        },
+        "file": {
+          "type": "string",
+          "description": "Relative path from brands.yaml to the PNG file (e.g. manual/paypal-login.png).",
+          "pattern": "^manual/.*\\.png$"
+        },
+        "screenshot_url": {
+          "type": "string",
+          "description": "Optional remote URL if the screenshot is hosted (e.g. in MinIO).",
+          "pattern": "^https?://"
+        }
+      }
+    }
+  }
+}

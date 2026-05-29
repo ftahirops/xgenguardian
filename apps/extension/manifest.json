@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "XGenGuardian",
   "short_name": "XGG",
-  "version": "0.2.0",
+  "version": "0.3.2",
   "description": "Catches phishing your DNS missed. Per-URL evidence for every block.",
   "default_locale": "en",
   "icons": {
@@ -26,6 +26,7 @@
     "storage",
     "tabs",
     "webNavigation",
+    "webRequest",
     "declarativeNetRequest",
     "alarms",
     "scripting",
@@ -66,6 +67,8 @@
         "src/warn.js",
         "src/isolate.html",
         "src/isolate.js",
+        "src/dnsfail.html",
+        "src/dnsfail.js",
         "icons/*"
       ],
       "matches": ["<all_urls>"]

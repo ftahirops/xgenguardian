@@ -28,6 +28,7 @@
 package policy
 
 import (
+	"net"
 	"strings"
 
 	"github.com/xgenguardian/services/verdict-api/internal/pageclass"
@@ -126,6 +127,14 @@ type ContextOutput struct {
 	// On its own a soft signal (some dev/test traffic uses IPs); promotes
 	// to BLOCK when combined with RawIPBinaryDrop.
 	RawIPHost bool
+	// SuspiciousHostnameSignals — true when Tier-1 hostname-shape detectors
+	// fired (DGA classifier OR random-host heuristic). On its own this is
+	// advisory WARN; combined with fresh cert / no domain age / untrusted
+	// identity it promotes higher.
+	SuspiciousHostnameSignals bool
+	// SuspiciousHostnameDetail — short reason string surfaced in the block
+	// page (e.g. "DGA classifier + random-host heuristic both fired").
+	SuspiciousHostnameDetail  string
 	// RawIPBinaryDrop — raw IP host + Mirai-style architecture path
 	// (e.g. http://1.2.3.4/x86, /arm5, /mips, /sh4). Near-certain malware
 	// drop; the canonical signature of IoT botnet C2 infrastructure.
@@ -158,6 +167,66 @@ type ContextOutput struct {
 	// matched. Indicates the vendor likely changed their install command
 	// and we need to refresh the template. Does NOT change the verdict.
 	OfficialMatchMissOnTrusted bool
+
+	// DomainAgeDays — registered-age of the domain in whole days, from RDAP.
+	// 0 means "unknown" (RDAP lookup failed, no registration date, or fresh
+	// boot before RDAP cache populated). Use DomainAgeKnown to distinguish
+	// "we asked and got 0" from "we never asked".
+	//
+	// Thresholds used by the policy:
+	//   <7 days   + sensitive page  → ISOLATE  (fresh + login/payment risk)
+	//   <30 days  + medium feed hit → promote WARN → BLOCK
+	//   <30 days  + suspicious host → promote WARN → ISOLATE
+	//   <90 days  + weak replica    → promote replica confidence
+	//   ≥730 days + suspicious host → demote ISOLATE → WARN (old domain
+	//                                  with weird name is far less suspect)
+	DomainAgeDays  int
+	DomainAgeKnown bool
+
+	// Phase 6: deep DOM signals from sandbox-render's DOM inventory.
+	// Counted/derived in policymap.go from render.Links, render.HiddenElements, etc.
+
+	// RiskyDownloadCount — count of links with IsRiskyDownload=true.
+	RiskyDownloadCount int
+	// HiddenSuspiciousCount — count of hidden_elements where Tag is
+	// "a", "iframe", or "form" AND HrefOrSrc is non-empty.
+	HiddenSuspiciousCount int
+	// ObfuscatedJSIndicators — distinct indicator strings from suspicious_js,
+	// excluding "external" (high-volume noise not indicative alone).
+	ObfuscatedJSIndicators []string
+	// HasCrossOriginIframe — any iframe where !SameOrigin && !Visible.
+	HasCrossOriginIframe bool
+	// HasClickjackOverlay — any overlay where CoveragePct>=25 && Transparent
+	// && InterceptsClicks.
+	HasClickjackOverlay bool
+
+	// VendorDNSBlocked — true when at least 2 independent protective-DNS
+	// providers (Cloudflare Family/Security, Quad9, AdGuard Default/Family,
+	// OpenDNS, CleanBrowsing) returned a sinkhole/NXDOMAIN for the domain.
+	// Treated as Tier-0 hard BLOCK — these providers maintain massive,
+	// continuously-updated threat lists (malware, phishing, scams, ad/
+	// malvertising networks). Two-of-eight agreement is near-zero false-
+	// positive rate.
+	VendorDNSBlocked bool
+	// VendorDNSSingleHit — true when exactly one provider blocks.
+	// Advisory: surfaces the signal but doesn't auto-BLOCK alone (single-
+	// vendor false positives do happen, especially with strict family DNS
+	// filters that overreach on borderline content). Other rules can use
+	// this to upgrade a borderline verdict.
+	VendorDNSSingleHit bool
+	// VendorDNSBlockedBy — names of the providers that returned a block.
+	// Surfaced to the block page so the user sees "Cloudflare + Quad9
+	// both block this domain" rather than an opaque "DNS says no".
+	VendorDNSBlockedBy []string
+
+	// BrowserRemoteIP — Phase B: the IP the browser actually connected to,
+	// reported by the extension. Empty when the extension didn't supply it
+	// (older extension, request from portal/scheduler, webRequest unavailable).
+	BrowserRemoteIP string
+	// BrowserRemoteIPIsPrivate — true when BrowserRemoteIP is in RFC1918,
+	// loopback, link-local, IPv6 ULA, or CGNAT space. Used together with
+	// "domain is public" to fire PUBLIC_DOMAIN_PRIVATE_IP.
+	BrowserRemoteIPIsPrivate bool
 }
 
 // Inputs to Apply().
@@ -176,6 +245,15 @@ type Inputs struct {
 
 	// Paranoid: Executive Mode toggle. Tightens generic mapping.
 	Paranoid     bool
+
+	// Mode — the user's protection mode from the extension Options page.
+	// "normal" | "safe" | "family" | "strict" | "paranoid" | "ultra".
+	//
+	// ULTRA mode (Phase 5): inverts the default verdict. Where the other
+	// modes ask "is there evidence of badness?", ultra asks "is there
+	// proof of cleanliness?" — any URL not affirmatively cleared opens
+	// in ISOLATE. Implemented at the end of Apply as Stage U.
+	Mode string
 
 	// CategoryBlocks — per-category enable flags from the extension's
 	// mode/categories selector. When a feed hit's category is true here,
@@ -196,7 +274,99 @@ type Inputs struct {
 	// noisy credential-sink rules that frequently false-positive on legit
 	// login flows (GitHub login posts to analytics + captcha + auth, which
 	// our hidden-mirror detector treats as suspicious).
+	//
+	// Phase C.3 transition: this is the legacy aggregate. New code should
+	// consult the scope-specific fields below (TrustedForLogin etc.).
+	// TrustedIdentity is kept as an alias for TrustedAnyScope so existing
+	// soft-rule call sites continue to behave identically — Phase D
+	// rewrites those rules to ask the right scope and this field goes away.
 	TrustedIdentity bool
+
+	// Phase C.3 — scope-aware trust. Populated by policymap.go from
+	// brandgraph.Trust(host, scope). A host can be trusted for one scope
+	// without being trusted for others — gstatic.com is trusted as a
+	// script source but NOT as a login destination, so a credential form
+	// rendered on a gstatic.com URL should NOT suppress credential-sink
+	// rules. Today every soft rule still consults TrustedIdentity; Phase D
+	// migrates them to the right scope below.
+
+	// TrustedForLogin — host is a curated login destination
+	// (accounts.google.com, login.live.com, github.com, appleid.apple.com).
+	// Suppresses CREDENTIAL_SINK_HIDDEN_MIRROR and friends.
+	TrustedForLogin bool
+	// TrustedForPayment — host is a curated payment destination
+	// (checkout.stripe.com, www.paypal.com, checkout.paypal.com).
+	// Suppresses payment-sink-cross-origin warnings.
+	TrustedForPayment bool
+	// TrustedForOAuth — host is a curated OAuth redirect endpoint. Allows
+	// unusual scope grants without unknown-clientID escalation.
+	TrustedForOAuth bool
+	// TrustedForScript — host is a curated script/CDN source (gstatic.com,
+	// googleusercontent.com, googletagmanager.com). Suppresses
+	// SCRIPT_ORIGIN_DRIFT but does NOT suppress credential or payment sinks.
+	TrustedForScript bool
+	// TrustedForCDN — host is a curated static-asset CDN. Suppresses
+	// shared-hosting penalties for the static path without granting any
+	// action-bearing trust.
+	TrustedForCDN bool
+	// TrustedForDocs — host is a curated documentation source. Allows
+	// install-command publication without REQUIRE_APPROVAL escalation.
+	TrustedForDocs bool
+	// TrustedAnyScope — true if any of the scoped fields above is true OR
+	// the host is in full-trust (a curated canonical brand domain). This
+	// is the field TrustedIdentity is aliased from. Use this only when the
+	// call site really doesn't care which scope — most checks should pick
+	// a specific scope above.
+	TrustedAnyScope bool
+
+	// Phase D — positive trust score in [0.0, 1.0]. Aggregates domain age,
+	// feed/vendor-DNS cleanliness, brand/org membership, HTTPS validity.
+	// Populated by policymap.go from existing context + brandgraph signals.
+	//
+	// IMPORTANT: this score is for soft-rule suppression only. Hard rules
+	// (vendor DNS consensus, feed-high hit, raw-IP binary drop, public-
+	// domain-private-IP, YARA critical) must ignore it. A compromised
+	// trusted brand still BLOCKs on hard evidence.
+	//
+	// Phase E rewrites the noisy soft rules to consult this. Today no
+	// rule reads it — D.2 ships the wiring only.
+	TrustScore        float64
+	TrustContributors []TrustContributor
+}
+
+// HighTrustScoreThreshold is the trust-score floor at which soft rules
+// stop firing on a non-trustreg domain. Tuned conservatively at 0.7 —
+// requires multiple positive signals (e.g. 3+ year-old domain + clean
+// feeds + clean vendor DNS) rather than a single one. Phase E.
+//
+// Hard rules ignore this threshold. A compromised trusted brand still
+// BLOCKs on vendor-DNS consensus, feed-high hit, raw-IP-binary-drop,
+// PUBLIC_DOMAIN_PRIVATE_IP, or YARA critical regardless of trust.
+const HighTrustScoreThreshold = 0.70
+
+// IsHighlyTrusted reports whether soft rules should be suppressed on this
+// host. Returns true when either:
+//
+//   - the host is in brandgraph under any scope (curated trust), OR
+//   - the aggregated trust score crosses HighTrustScoreThreshold.
+//
+// Used by HIDDEN_MALICIOUS_LINK, HIDDEN_IFRAME_CROSS_ORIGIN,
+// OBFUSCATED_JS_DETECTED, RANDOM_HOSTNAME, SUSPICIOUS_DOWNLOAD_OFFERED.
+// Hard rules MUST NOT call this — they fire independent of trust.
+func (in Inputs) IsHighlyTrusted() bool {
+	if in.TrustedAnyScope {
+		return true
+	}
+	return in.TrustScore >= HighTrustScoreThreshold
+}
+
+// TrustContributor is one labeled weight that moved the trust score.
+// Surfaced in the evidence UI so users can see *why* a score was high.
+// Mirrors trustscore.Contributor — duplicated here to keep internal/policy
+// independent of internal/trustscore at the type level.
+type TrustContributor struct {
+	Label  string
+	Weight float64
 }
 
 // Result is what gateway.go turns into the HTTP response.
@@ -209,6 +379,15 @@ type Result struct {
 	// StageOutcome maps stage letter → "pass" | "fail" | "unknown" | "skip"
 	// for analytics + the report-page drill-down.
 	StageOutcome map[string]string
+
+	// ClearanceChecks — per-gate pass/fail summary for Ultra mode (always
+	// populated in Ultra; populated best-effort in other modes for the
+	// block-page transparency grid). Keys are stable identifiers; values
+	// are "pass" | "fail" | "warn" | "unknown".
+	//
+	// Gates: "feed", "vendor_dns", "domain_age", "hostname_shape",
+	//        "visual", "identity", "behavior", "trust".
+	ClearanceChecks map[string]string
 }
 
 // Apply runs Stage G — combines per-stage outputs into the final verdict via
@@ -219,6 +398,51 @@ func Apply(in Inputs) Result {
 		Verdict:      Allow,
 		ReasonCodes:  []string{},
 		StageOutcome: map[string]string{},
+	}
+
+	// --- Stage CI: connection identity (Phase B hard rule) ---
+	//
+	// If the browser actually connected to a private/loopback/CGNAT IP for
+	// what we believe is a public domain, the user's DNS path is hijacked:
+	// router compromise, hosts-file tampering, malicious LAN resolver, or
+	// (less likely) DNS rebinding from an attacker page. Either way, no
+	// signal downstream (vendor DNS, feeds, render, visual match, trust
+	// score) is trustworthy on this connection — the bytes the browser
+	// rendered did not come from the real origin.
+	//
+	// This MUST fire before Stage 0 / TrustedIdentity. A trusted-brand
+	// domain pointed at 10.0.0.5 is a classic phish kit running on the
+	// attacker's LAN box — being a trusted brand makes it MORE dangerous,
+	// not less.
+	if in.Context.BrowserRemoteIP != "" && in.Context.BrowserRemoteIPIsPrivate && isPublicDomain(in.Domain) {
+		r.Verdict = Block
+		r.Confidence = 0.97
+		r.BlockReason = "This public domain resolved to a private IP (" + in.Context.BrowserRemoteIP + "). The DNS path appears to be hijacked."
+		r.ReasonCodes = append(r.ReasonCodes, string(reasons.PublicDomainPrivateIP))
+		r.StageOutcome["CI"] = "fail-public-domain-private-ip"
+		return r
+	}
+
+	// --- Stage 0: VendorDNS multi-provider consensus (highest-priority BLOCK) ---
+	//
+	// Eight independent protective-DNS providers (Cloudflare Family/Security,
+	// Quad9, AdGuard Default/Family, OpenDNS, CleanBrowsing) all maintain
+	// massive, continuously-updated threat lists. When ≥2 of them sinkhole
+	// the same domain, the agreement is near-zero false-positive rate — it
+	// means multiple independent security teams have confirmed the threat.
+	//
+	// Trusted-identity hosts are still checked first to handle the rare case
+	// of a vendor false-positive on a real brand domain (e.g. a family-DNS
+	// provider over-blocking a major brand's CDN). For non-trusted hosts,
+	// consensus blocks short-circuit the entire pipeline.
+	if in.Context.VendorDNSBlocked && !in.TrustedIdentity {
+		r.Verdict = Block
+		r.Confidence = 0.97
+		blockedBy := joinUpTo(in.Context.VendorDNSBlockedBy, 4)
+		r.BlockReason = "Domain is on the blocklist of multiple independent protective-DNS providers (" + blockedBy + ")."
+		r.ReasonCodes = append(r.ReasonCodes, string(reasons.VendorDNSConsensusBlock))
+		r.StageOutcome["0"] = "fail-vendordns-consensus"
+		return r
 	}
 
 	// --- Stage F.0: category-feed BLOCK + content-vs-security split ---
@@ -240,7 +464,11 @@ func Apply(in Inputs) Result {
 		hasContentOnly := true
 		anyContentEnabled := false
 		for _, cat := range in.Context.FeedCategories {
-			if !isContentCategory(cat) {
+			if cat == "" || !isContentCategory(cat) {
+				// Empty = security feed row (URLhaus, OpenPhish, etc.) — these
+				// rows have no category label. Non-content labels are likewise
+				// security-class. Either way the hit is NOT purely content;
+				// don't strip the feed signal.
 				hasContentOnly = false
 				continue
 			}
@@ -304,6 +532,23 @@ func Apply(in Inputs) Result {
 		// (visual replica, sink failure, etc.) can still upgrade to BLOCK
 		// or downgrade to ALLOW. The reason code surfaces so the report
 		// page shows analysts WHY this URL got extra scrutiny.
+		//
+		// Fresh-domain promotion: a single noisy-feed hit on a domain
+		// registered <30 days ago is qualitatively different from the same
+		// hit on a 5-year-old domain. Real phishing campaigns burn through
+		// fresh domains; established sites stay flagged for known reasons.
+		// Promote WARN→BLOCK when both signals agree.
+		if in.Context.DomainAgeKnown && in.Context.DomainAgeDays < 30 {
+			r.Verdict = Block
+			r.Confidence = 0.85
+			r.BlockReason = "URL flagged by community feed (" +
+				in.Context.FeedMediumSources[0] +
+				") and the domain was registered in the last 30 days."
+			r.ReasonCodes = append(r.ReasonCodes, string(reasons.ExternalFeedHit))
+			r.ReasonCodes = append(r.ReasonCodes, string(reasons.FreshDomain))
+			r.StageOutcome["F"] = "fail-feed-single-medium+fresh-domain"
+			return r
+		}
 		r.Verdict = Warn
 		r.Confidence = 0.55
 		r.BlockReason = "URL flagged by one community feed (" +
@@ -342,14 +587,17 @@ func Apply(in Inputs) Result {
 	// regardless of replica score. This is the canonical phishing tell
 	// independent of "does the page look like a brand".
 	//
-	// EXCEPTION: trusted-identity hosts (github.com/login, accounts.google.com
-	// etc.). Real login flows on these brands routinely POST to multiple
-	// endpoints — analytics, captcha, auth — which trips our hidden-mirror
-	// and multi-destination detectors. For trusted brands, sink heuristics
-	// stay advisory (codes are recorded) but never block on their own; we
-	// require an explicit Identity mismatch to flip the verdict (the BLOCK
-	// path in the next section).
-	if in.PageClass.IsSensitive() && !in.TrustedIdentity {
+	// EXCEPTIONS:
+	//   - trusted-identity hosts (github.com/login, accounts.google.com etc.)
+	//     routinely POST to multiple endpoints — analytics, captcha, auth —
+	//     which trips our hidden-mirror and multi-destination detectors.
+	//   - non-credential page classes (Download, DeveloperToolInstallLure)
+	//     have download links + install commands that point to the brand's
+	//     own CDN (signal.org/download → updates.signal.org/...). The
+	//     cross-origin sink detector treats that as "credentials going
+	//     elsewhere", producing false positives. Use IsCredentialPage()
+	//     which only matches Login/Password/MFA/OAuth/Payment/Crypto/Invoice.
+	if in.PageClass.IsCredentialPage() && !in.TrustedIdentity {
 		if in.Sink.HiddenMirror {
 			r.Verdict = Block
 			r.Confidence = 0.95
@@ -399,14 +647,28 @@ func Apply(in Inputs) Result {
 	// high alone is not malicious; the verdict needs the identity-binding
 	// failure to flip. Each Identity mismatch gets its own reason code.
 	//
-	// EXCEPTION: trusted-identity hosts. CLIP can misclassify pages from
-	// real brands (e.g. buy.itunes.apple.com matched a different brand at
-	// 0.86). When we already know the host is a major brand, a high CLIP
-	// match to a different brand is more likely a model error than phishing.
+	// CORROBORATION GATE — when CLIP returns a high-confidence match but
+	// the brand's keyword does NOT appear in the URL or page title, that's
+	// suspicious of a degenerate-embedding misfire (page rendered as a
+	// blank Cloudflare challenge, error page, etc.) — NOT a real replica
+	// claim. We DOWNGRADE the verdict in that case rather than skipping
+	// the rule entirely so unknown-brand-on-sensitive-page still ISOLATEs.
+	//
+	// Trusted-identity hosts skip the whole rule (handled separately below).
 	if in.Replica.IsHighMatch && !in.Identity.Bound && !in.TrustedIdentity {
 		if in.Identity.Unknown {
-			// Replica high + identity unknown → can't confirm phishing,
-			// can't bless either. ISOLATE for sensitive, WARN otherwise.
+			// Replica high + identity unknown. WITH brand-name in URL/title →
+			// real impersonation tell (ISOLATE/WARN). WITHOUT corroboration →
+			// likely CLIP misfire on a degenerate render (porn.com→Trezor,
+			// piratebayproxy→Snapchat, jevhcksi→Discord class). Skip the
+			// replica-driven action entirely; downstream rules (suspicious
+			// host, raw-IP, behavior) can still fire.
+			if !in.Replica.BrandNameInURL {
+				// Fall through silently. Tier-1 suspicious-host signals
+				// upstream may still WARN/ISOLATE; if not, ALLOW is the
+				// honest outcome.
+				return r
+			}
 			r.ReasonCodes = append(r.ReasonCodes, string(reasons.VisualReplicaHigh))
 			if in.PageClass.IsSensitive() {
 				r.Verdict = Isolate
@@ -423,26 +685,51 @@ func Apply(in Inputs) Result {
 			r.StageOutcome["B+C"] = "unknown"
 			return r
 		}
-		// Identity is explicitly false. BLOCK with whichever mismatches fired.
-		r.Verdict = Block
-		r.Confidence = 0.9
-		r.ReasonCodes = append(r.ReasonCodes, string(reasons.VisualReplicaHigh))
-		if in.Identity.MismatchDomain {
-			r.ReasonCodes = append(r.ReasonCodes, string(reasons.IdentityMismatchDomain))
+		// Identity is explicitly false. WITH brand-name corroboration in the
+		// URL/title → BLOCK at high confidence (real impersonation: the
+		// attacker visually copied the brand AND named the URL after it).
+		//
+		// WITHOUT corroboration → IGNORE. The visual match is almost
+		// certainly a CLIP misfire on a degenerate render (porn.com→Trezor,
+		// piratebayproxy→Snapchat, login.tailscale.com→Reddit class). Acting
+		// on it ISOLATEd legitimate sites whose minimal login UIs happen to
+		// embed close to some seeded brand. The brandgraph "identity not
+		// bound" is also degenerate here: of course Tailscale's domain isn't
+		// bound to Reddit — they're unrelated brands. Mismatch is the
+		// *expected* state for any URL where the visual hit was wrong.
+		//
+		// Real phishing always names the brand in the URL or title — that's
+		// the whole point of impersonation. The corroboration gate is what
+		// distinguishes "this is engineered to fool the user" from "CLIP got
+		// confused by a generic login layout". Downstream rules (feed hits,
+		// fresh domain, suspicious host, raw-IP, behavior) can still BLOCK
+		// or ISOLATE this URL for *their own* reasons; we just don't let
+		// the uncorroborated visual match be one of those reasons.
+		if in.Replica.BrandNameInURL {
+			r.ReasonCodes = append(r.ReasonCodes, string(reasons.VisualReplicaHigh))
+			if in.Identity.MismatchDomain {
+				r.ReasonCodes = append(r.ReasonCodes, string(reasons.IdentityMismatchDomain))
+			}
+			if in.Identity.MismatchASN {
+				r.ReasonCodes = append(r.ReasonCodes, string(reasons.IdentityMismatchASN))
+			}
+			if in.Identity.MismatchCert {
+				r.ReasonCodes = append(r.ReasonCodes, string(reasons.IdentityMismatchCert))
+			}
+			if in.Identity.MismatchScriptOrigin {
+				r.ReasonCodes = append(r.ReasonCodes, string(reasons.IdentityMismatchScriptOrigin))
+			}
+			r.Verdict = Block
+			r.Confidence = 0.9
+			r.BlockReason = "Page visually replicates " + in.Replica.Brand +
+				" AND the URL/title references " + in.Replica.Brand +
+				", but the hosting does not match " + in.Replica.Brand + "'s real infrastructure."
+			r.StageOutcome["B+C"] = "fail-corroborated"
+			return r
 		}
-		if in.Identity.MismatchASN {
-			r.ReasonCodes = append(r.ReasonCodes, string(reasons.IdentityMismatchASN))
-		}
-		if in.Identity.MismatchCert {
-			r.ReasonCodes = append(r.ReasonCodes, string(reasons.IdentityMismatchCert))
-		}
-		if in.Identity.MismatchScriptOrigin {
-			r.ReasonCodes = append(r.ReasonCodes, string(reasons.IdentityMismatchScriptOrigin))
-		}
-		r.BlockReason = "Page visually replicates " + in.Replica.Brand +
-			" but the hosting does not match " + in.Replica.Brand + "'s real infrastructure."
-		r.StageOutcome["B+C"] = "fail"
-		return r
+		// Uncorroborated → fall through silently. Downstream rules can
+		// still fire on their own merits.
+		r.StageOutcome["B+C"] = "uncorroborated-suppressed"
 	}
 
 	// --- Stage B+C borderline: visual score 0.65-0.70 + brand-name-in-URL ---
@@ -466,32 +753,43 @@ func Apply(in Inputs) Result {
 	}
 
 	// --- Stage B+C weak: low-confidence replica needs corroboration ---
-	// CLIP scores on novel phishing often cluster at 0.70-0.85: similar enough
-	// to a brand to be suspicious, not similar enough to be confident on its
-	// own. We promote to WARN when corroborated by ANY of:
-	//   - sensitive page class (login/payment/oauth)
-	//   - untrusted-identity host (not in trustreg)
-	//   - identity binding explicitly false
-	// Trusted-identity hosts are protected: a weak visual match against the
-	// real PayPal page from inside paypal.com must never WARN.
-	if in.Replica.IsWeakMatch && !in.TrustedIdentity && !in.Identity.Bound {
-		// Untrusted host + any weak visual match to a known brand → suspicious.
-		// Promote to WARN. Sensitive class bumps to ISOLATE for fail-safety.
+	// CLIP scores in 0.70-0.85 are inherently ambiguous: they fire on real
+	// phishing AND on generic minimal-form login pages that happen to embed
+	// close to some seeded brand (login.tailscale.com → Reddit at 0.848 is
+	// the canonical false-positive). Without brand-name corroboration in
+	// the URL or page title, treating a weak match as suspicious has too
+	// many FPs to be useful — the visual model is too noisy at this band.
+	//
+	// Therefore: weak-match action requires BrandNameInURL=true. With it,
+	// the page is engineered to look like the brand AND named after the
+	// brand, on a host the brand doesn't own → confidently suspicious.
+	// Without it, suppress and let downstream rules speak.
+	//
+	// Trusted-identity hosts are also protected: a weak match to the real
+	// PayPal page from inside paypal.com must never WARN.
+	if in.Replica.IsWeakMatch && !in.TrustedIdentity && !in.Identity.Bound &&
+		in.Replica.BrandNameInURL {
 		r.ReasonCodes = append(r.ReasonCodes, string(reasons.VisualReplicaHigh))
 		if in.PageClass.IsSensitive() {
 			r.Verdict = Isolate
-			r.Confidence = 0.55
+			r.Confidence = 0.6
 			r.BlockReason = "Page resembles " + in.Replica.Brand +
-				" on a domain we don't recognize. Opening in isolation."
-			r.StageOutcome["B+C"] = "weak-sensitive"
+				" and the URL/title references " + in.Replica.Brand +
+				" but the hosting doesn't match. Opening in isolation."
+			r.StageOutcome["B+C"] = "weak-sensitive-corroborated"
 			return r
 		}
 		r.Verdict = Warn
-		r.Confidence = 0.55
+		r.Confidence = 0.6
 		r.BlockReason = "Page resembles " + in.Replica.Brand +
+			" and the URL/title references " + in.Replica.Brand +
 			" but the hosting doesn't match. Proceed with caution."
-		r.StageOutcome["B+C"] = "weak-untrusted"
+		r.StageOutcome["B+C"] = "weak-untrusted-corroborated"
 		return r
+	}
+	if in.Replica.IsWeakMatch && !in.TrustedIdentity && !in.Replica.BrandNameInURL {
+		// CLIP weak match without corroboration — suppress.
+		r.StageOutcome["B+C"] = "weak-uncorroborated-suppressed"
 	}
 
 	// --- Stage E: anti-cloaking force-ISOLATE ---
@@ -594,6 +892,86 @@ func Apply(in Inputs) Result {
 		return r
 	}
 
+	// --- Suspicious hostname (DGA / random-host) on untrusted infrastructure ---
+	//
+	// jevhcksi.org-class case: hostname looks random AND host is not trusted
+	// AND cert is fresh. Each signal alone is weak; together they're a
+	// strong "this is a short-lived attack host" pattern.
+	//
+	// Skipped for trusted-identity hosts (some real brands have weird
+	// internal hostnames). Skipped when the page successfully renders to
+	// a known visual brand match — visual override beats lexical guess.
+	if in.Context.SuspiciousHostnameSignals && !in.IsHighlyTrusted() && in.Replica.Brand == "" {
+		// Domain-age modifier: a 5-year-old domain with a weird-looking name
+		// is far less suspicious than a 3-day-old one. The fp-bench class
+		// "legitimate small-business site with terse SLD" was generating
+		// false ISOLATEs; the age gate filters them out.
+		isOldDomain := in.Context.DomainAgeKnown && in.Context.DomainAgeDays >= 730
+		isFreshDomain := in.Context.DomainAgeKnown && in.Context.DomainAgeDays < 30
+
+		// Promote stronger when the page is sensitive (login / payment /
+		// install-command etc.) — that's where the attacker payoff is.
+		if in.PageClass.IsSensitive() {
+			if isOldDomain {
+				// Old + sensitive + weird name → WARN (not ISOLATE).
+				r.Verdict = Warn
+				r.Confidence = 0.55
+				r.BlockReason = "Hostname looks randomly generated, but the domain has been registered for years. Treating as advisory."
+				r.ReasonCodes = append(r.ReasonCodes, string(reasons.RandomHostname))
+				r.StageOutcome["F"] = "suspicious-host-sensitive-old"
+				return r
+			}
+			if isFreshDomain {
+				// Fresh + sensitive + weird name → BLOCK (high-confidence
+				// "burner phishing host" pattern).
+				r.Verdict = Block
+				r.Confidence = 0.85
+				r.BlockReason = "Sensitive page on a random-looking host registered in the last 30 days — high-risk burner-domain pattern."
+				r.ReasonCodes = append(r.ReasonCodes, string(reasons.RandomHostname))
+				r.ReasonCodes = append(r.ReasonCodes, string(reasons.FreshDomain))
+				r.StageOutcome["F"] = "fail-suspicious-host-fresh-sensitive"
+				return r
+			}
+			r.Verdict = Isolate
+			r.Confidence = 0.7
+			r.BlockReason = "Sensitive page on a random-looking host with no known reputation. Opening in isolation."
+			r.ReasonCodes = append(r.ReasonCodes, string(reasons.RandomHostname))
+			r.StageOutcome["F"] = "suspicious-host-sensitive"
+			return r
+		}
+		// Non-sensitive page.
+		if isOldDomain {
+			// Old + weird name + non-sensitive → no action; downstream
+			// rules can still surface other issues.
+			r.StageOutcome["F"] = "suspicious-host-old-suppressed"
+		} else {
+			r.Verdict = Warn
+			r.Confidence = 0.6
+			r.BlockReason = "Hostname looks randomly generated. " + in.Context.SuspiciousHostnameDetail
+			r.ReasonCodes = append(r.ReasonCodes, string(reasons.RandomHostname))
+			r.StageOutcome["F"] = "suspicious-host"
+		}
+		// Don't return — let deeper rules (visual, sink, etc.) escalate if needed.
+	}
+
+	// --- Fresh-domain + sensitive-page rule ---
+	//
+	// Independent of any other signal: a domain registered in the last 7 days
+	// hosting a login/payment/oauth/admin page is a very high-risk pattern.
+	// Legitimate brands almost never launch new domains for sensitive flows
+	// without significant trust ceremony (cert chain, brand mention, ASN
+	// affinity). Default to ISOLATE; let downstream identity-binding rules
+	// upgrade to ALLOW when the host is trusted.
+	if in.Context.DomainAgeKnown && in.Context.DomainAgeDays < 7 &&
+		in.PageClass.IsSensitive() && !in.TrustedIdentity {
+		r.Verdict = Isolate
+		r.Confidence = 0.75
+		r.BlockReason = "Sensitive page on a domain registered in the last 7 days. Opening in isolation as a precaution."
+		r.ReasonCodes = append(r.ReasonCodes, string(reasons.FreshDomain))
+		r.StageOutcome["F"] = "fresh-domain-sensitive"
+		return r
+	}
+
 	// --- Raw-IP malware drop ---
 	// Near-certain Mirai/Gafgyt-style botnet binary distribution: raw IP
 	// host + architecture-named path. Skipped for trusted-identity hosts
@@ -612,7 +990,13 @@ func Apply(in Inputs) Result {
 	// network and doesn't reach the verdict service. Public raw-IP URLs
 	// in the wild are almost exclusively malware C2, botnet drops, or
 	// phishing kits hosted on compromised boxes.
-	if in.Context.RawIPHost {
+	//
+	// EXCEPTION: operator-configured trusted hosts. Self-hosted apps on
+	// known IPs (e.g. internal egress proxies, dev VPSs) are flagged as
+	// trusted via XGG_LOCAL_TRUSTED_HOSTS. Skip the raw-IP block for
+	// those — the same env var already protects them from other
+	// fail-closed rules via in.TrustedIdentity.
+	if in.Context.RawIPHost && !in.TrustedIdentity {
 		r.Verdict = Block
 		r.Confidence = 0.75
 		r.BlockReason = "URL points at a raw IP address — legitimate websites use domain names."
@@ -631,6 +1015,112 @@ func Apply(in Inputs) Result {
 		r.ReasonCodes = append(r.ReasonCodes, in.Context.YaraReasonCodes...)
 		r.StageOutcome["F"] = "yara"
 		// Do not return; let later rules upgrade to BLOCK if they fire.
+	}
+
+	// --- Stage F.4: deep DOM evidence (Phase 6) ---
+	//
+	// Hidden malicious anchors, obfuscated JS, clickjack overlays, cross-
+	// origin hidden iframes — extracted by sandbox-render's DOM inventory.
+	// Second-order signals: each alone is suspicious but legitimate sites
+	// occasionally have them. Only the highest-severity combinations block.
+
+	if in.Context.HasClickjackOverlay && !in.TrustedIdentity {
+		if in.PageClass.IsSensitive() {
+			r.Verdict = Isolate
+			r.Confidence = 0.8
+			r.BlockReason = "Page has a full-viewport transparent overlay that captures clicks — classic clickjack pattern on a sensitive page."
+			r.ReasonCodes = append(r.ReasonCodes, string(reasons.OverlayClickjack))
+			r.StageOutcome["F4"] = "fail-clickjack"
+			return r
+		}
+		r.Verdict = Warn
+		r.Confidence = 0.7
+		r.BlockReason = "Page has a full-viewport transparent overlay that captures clicks. Proceed with caution."
+		r.ReasonCodes = append(r.ReasonCodes, string(reasons.OverlayClickjack))
+		r.StageOutcome["F4"] = "warn-clickjack"
+		// Don't return — let downstream upgrade if needed.
+	}
+
+	// Obfuscated-JS rule: high-entropy alone matches every modern webpack /
+	// Vite / esbuild bundle, so we exclude it from the count unless paired
+	// with a HIGH-signal indicator. Real malware obfuscation pairs
+	// high-entropy with eval/Function-constructor/atob-chains/document-write.
+	{
+		strong := 0 // count "smoking gun" indicators
+		hasEntropy := false
+		for _, ind := range in.Context.ObfuscatedJSIndicators {
+			switch ind {
+			case "eval", "function_constructor", "atob_chain",
+				"document_write", "base64_blob":
+				strong++
+			case "high_entropy":
+				hasEntropy = true
+			}
+		}
+		// Trigger when:
+		//   - 2+ strong indicators (clear obfuscation pattern), OR
+		//   - 1 strong + high-entropy (entropy corroborates a strong signal)
+		fire := strong >= 2 || (strong >= 1 && hasEntropy)
+		if fire && !in.IsHighlyTrusted() {
+			if r.Verdict == Allow {
+				r.Verdict = Warn
+				r.Confidence = 0.6
+			}
+			r.ReasonCodes = append(r.ReasonCodes, string(reasons.ObfuscatedJSDetected))
+			r.StageOutcome["F4"] = "warn-obfuscated-js"
+		}
+	}
+
+	if in.Context.HasCrossOriginIframe && !in.IsHighlyTrusted() {
+		if r.Verdict == Allow {
+			r.Verdict = Warn
+			r.Confidence = 0.55
+		}
+		r.ReasonCodes = append(r.ReasonCodes, string(reasons.HiddenIframeCrossOrigin))
+		r.StageOutcome["F4"] = "warn-hidden-iframe"
+	}
+
+	if in.Context.RiskyDownloadCount > 0 && !in.IsHighlyTrusted() {
+		sensitive := in.PageClass.IsSensitive()
+		devPage := in.PageClass == pageclass.Download ||
+			in.PageClass == pageclass.DeveloperToolInstallLure ||
+			in.Context.OfficialInstallMatch
+		switch {
+		case sensitive && !devPage:
+			// Login/payment/oauth page offering a download → very suspicious.
+			r.Verdict = Block
+			r.Confidence = 0.88
+			r.BlockReason = "Sensitive page (login/payment/OAuth) offers an executable or installer download — high-risk pattern."
+			r.ReasonCodes = append(r.ReasonCodes, string(reasons.SuspiciousDownloadOffered))
+			r.StageOutcome["F4"] = "fail-download-on-sensitive"
+			return r
+		case !devPage:
+			if r.Verdict == Allow {
+				r.Verdict = Warn
+				r.Confidence = 0.6
+			}
+			r.ReasonCodes = append(r.ReasonCodes, string(reasons.SuspiciousDownloadOffered))
+			r.StageOutcome["F4"] = "warn-download-non-dev"
+		}
+		// devPage + OfficialInstallMatch already gates ALLOW elsewhere; no action.
+	}
+
+	// Hidden anchors count alone is advisory; per-link feed cross-reference
+	// would be needed for a high-confidence block (deferred to a future pass).
+	//
+	// Threshold (8) tuned against real-world legitimate sites: signal.org/
+	// download has ~6 hidden cross-origin links (download mirrors for
+	// different OS architectures + GitHub source repo + social media
+	// footer). Mozilla has similar. Threshold of 5 produced FPs. 8+
+	// cross-origin hidden anchors on an untrusted host is the pattern of
+	// an attack page scraping referrers or hiding a link farm.
+	if in.Context.HiddenSuspiciousCount >= 8 && !in.IsHighlyTrusted() {
+		if r.Verdict == Allow {
+			r.Verdict = Warn
+			r.Confidence = 0.55
+		}
+		r.ReasonCodes = append(r.ReasonCodes, string(reasons.HiddenMaliciousLink))
+		r.StageOutcome["F4"] = "warn-hidden-anchors"
 	}
 
 	// --- Behavioral abuse (popup storm / clipboard hijack) → WARN ---
@@ -668,7 +1158,173 @@ func Apply(in Inputs) Result {
 		r.StageOutcome["G"] = "paranoid-isolate"
 	}
 
+	// --- Stage U: ULTRA mode clearance gate ---
+	//
+	// Ultra inverts the default. Every gate must affirmatively PASS for an
+	// ALLOW; the moment any gate is uncertain or fails, the URL opens in
+	// ISOLATE. This is the "guilty until proven innocent" model intended
+	// for executives, journalists, IR analysts, and personal high-security
+	// browsing where one-shot phishing is unacceptable.
+	//
+	// The previous rules can BLOCK or ISOLATE on positive evidence; Stage U
+	// upgrades ALLOWs to ISOLATE when the URL hasn't earned full clearance.
+	// We always populate ClearanceChecks (for the block-page transparency
+	// grid) but only flip the verdict when Mode == "ultra".
+	r.ClearanceChecks = computeClearanceChecks(in)
+	if strings.EqualFold(in.Mode, "ultra") && r.Verdict == Allow {
+		if !hasFullClearance(r.ClearanceChecks, in) {
+			r.Verdict = Isolate
+			r.Confidence = 0.7
+			r.BlockReason = "Ultra mode: this page hasn't earned full clearance. Opening in isolation."
+			r.ReasonCodes = append(r.ReasonCodes, string(reasons.UltraNotCleared))
+			r.StageOutcome["U"] = "ultra-not-cleared"
+		} else {
+			r.ReasonCodes = append(r.ReasonCodes, string(reasons.UltraCleared))
+			r.StageOutcome["U"] = "ultra-cleared"
+		}
+	}
+
 	return r
+}
+
+// computeClearanceChecks — per-gate pass/warn/fail/unknown for the
+// transparency grid the block page renders. Always called; even in
+// non-Ultra modes the user gets to see what passed.
+func computeClearanceChecks(in Inputs) map[string]string {
+	checks := map[string]string{}
+
+	// Threat-intel feeds
+	switch {
+	case len(in.Context.FeedHighSources) > 0:
+		checks["feed"] = "fail"
+	case len(in.Context.FeedMediumSources) >= 2:
+		checks["feed"] = "fail"
+	case len(in.Context.FeedMediumSources) == 1:
+		checks["feed"] = "warn"
+	default:
+		checks["feed"] = "pass"
+	}
+
+	// Vendor-DNS consensus
+	switch {
+	case in.Context.VendorDNSBlocked:
+		checks["vendor_dns"] = "fail"
+	case in.Context.VendorDNSSingleHit:
+		checks["vendor_dns"] = "warn"
+	default:
+		checks["vendor_dns"] = "pass"
+	}
+
+	// Domain age
+	switch {
+	case !in.Context.DomainAgeKnown:
+		checks["domain_age"] = "unknown"
+	case in.Context.DomainAgeDays < 30:
+		checks["domain_age"] = "fail"
+	case in.Context.DomainAgeDays < 180:
+		checks["domain_age"] = "warn"
+	default:
+		checks["domain_age"] = "pass"
+	}
+
+	// Hostname shape
+	switch {
+	case in.Context.RawIPBinaryDrop:
+		checks["hostname_shape"] = "fail"
+	case in.Context.RawIPHost:
+		checks["hostname_shape"] = "fail"
+	case in.Context.SuspiciousHostnameSignals:
+		checks["hostname_shape"] = "warn"
+	default:
+		checks["hostname_shape"] = "pass"
+	}
+
+	// Visual / replica
+	switch {
+	case in.Replica.IsHighMatch && !in.Identity.Bound && in.Replica.BrandNameInURL:
+		checks["visual"] = "fail"
+	case in.Replica.IsHighMatch && in.Identity.Bound:
+		checks["visual"] = "pass" // matches the brand AND hosted by it
+	case in.Replica.IsWeakMatch && !in.Identity.Bound:
+		checks["visual"] = "warn"
+	default:
+		checks["visual"] = "pass"
+	}
+
+	// Identity binding
+	switch {
+	case in.Identity.MismatchDomain || in.Identity.MismatchASN ||
+		in.Identity.MismatchCert || in.Identity.MismatchScriptOrigin:
+		checks["identity"] = "fail"
+	case in.Identity.Bound:
+		checks["identity"] = "pass"
+	case in.Identity.Unknown:
+		checks["identity"] = "unknown"
+	default:
+		checks["identity"] = "pass"
+	}
+
+	// Page behavior
+	switch {
+	case in.Context.BehaviorScareware:
+		checks["behavior"] = "fail"
+	case in.Context.BehaviorPopupStorm || in.Context.BehaviorClipboardHijack:
+		checks["behavior"] = "warn"
+	default:
+		checks["behavior"] = "pass"
+	}
+
+	// Positive trust signal
+	switch {
+	case in.TrustedIdentity:
+		checks["trust"] = "pass"
+	case in.Context.OfficialInstallMatch:
+		checks["trust"] = "pass"
+	default:
+		checks["trust"] = "unknown"
+	}
+
+	return checks
+}
+
+// hasFullClearance — Ultra-mode pass requires:
+//   - feed gate must be "pass" (no medium-single advisory either)
+//   - vendor_dns must be "pass"
+//   - domain_age must be "pass" OR the host is in trustreg (trust=pass)
+//   - hostname_shape must be "pass"
+//   - visual must be "pass"
+//   - identity must be "pass" OR trust=pass
+//   - behavior must be "pass" OR no sandbox data (unknown is fine —
+//     ultra forces sandbox elsewhere, but if sandbox failed we don't
+//     fault the user for that)
+//   - trust check is informational; it gates relaxations above but
+//     doesn't independently require pass
+//
+// Any other state → not cleared → ISOLATE.
+func hasFullClearance(c map[string]string, in Inputs) bool {
+	trustPass := c["trust"] == "pass"
+	if c["feed"] != "pass" {
+		return false
+	}
+	if c["vendor_dns"] != "pass" {
+		return false
+	}
+	if c["domain_age"] != "pass" && !trustPass {
+		return false
+	}
+	if c["hostname_shape"] != "pass" {
+		return false
+	}
+	if c["visual"] != "pass" {
+		return false
+	}
+	if c["identity"] != "pass" && !trustPass {
+		return false
+	}
+	if c["behavior"] == "fail" {
+		return false
+	}
+	return true
 }
 
 // joinUpTo joins up to n entries with ", ", appending "+%d more" if needed.
@@ -726,4 +1382,47 @@ func isContentCategory(c string) bool {
 		return true
 	}
 	return false
+}
+
+// isPublicDomain reports whether a host looks like a public registrable
+// domain (something that genuinely has DNS authority on the public internet),
+// as opposed to a raw IP literal or a local-only / test-only namespace.
+//
+// Used by the PUBLIC_DOMAIN_PRIVATE_IP hard rule: that rule only makes
+// sense when the user thinks they reached a public site. Hitting
+// http://router.local from 192.168.1.1 is not a hijack — both sides are
+// LAN. Hitting https://bank.example from 10.0.0.5 is a hijack.
+//
+// Rules:
+//   - empty / unparseable → false (we can't decide; don't fire the hard rule)
+//   - IP literal → false (raw-IP URLs are handled by RAW_IP_HOST, not here)
+//   - no dot → false (single-label hostnames are LAN names)
+//   - reserved/local TLDs (.local, .localhost, .internal, .test, .example,
+//     .invalid, .home, .lan, .corp) → false
+//   - everything else → true
+func isPublicDomain(host string) bool {
+	h := strings.TrimSpace(strings.ToLower(host))
+	if h == "" {
+		return false
+	}
+	if net.ParseIP(h) != nil {
+		return false
+	}
+	if !strings.Contains(h, ".") {
+		return false
+	}
+	// Trim trailing dot from FQDN form.
+	h = strings.TrimSuffix(h, ".")
+	for _, tld := range localTLDs {
+		if strings.HasSuffix(h, "."+tld) || h == tld {
+			return false
+		}
+	}
+	return true
+}
+
+var localTLDs = []string{
+	"local", "localhost", "internal", "intranet",
+	"test", "example", "invalid",
+	"home", "lan", "corp", "private",
 }

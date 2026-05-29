@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy" content="frame-ancestors 'none';">
   <title>Caution — XGenGuardian</title>
   <style>
     :root { color-scheme: dark; }
@@ -13,65 +14,175 @@
       color: #e8eaed;
       line-height: 1.55;
     }
-    .wrap { max-width: 720px; margin: 80px auto; padding: 0 24px; }
-    h1 { font-size: 30px; margin: 0 0 8px; }
+    .wrap { max-width: 980px; margin: 40px auto; padding: 0 24px; }
+    h1 { font-size: 32px; margin: 0 0 8px; }
+    h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.8px; color: #9aa3b2; margin: 36px 0 12px; }
     .pill {
       display: inline-block; background: #3b2a11; color: #ffc56b;
-      font-weight: 700; padding: 4px 12px; border-radius: 999px;
-      font-size: 12px; letter-spacing: 0.5px; text-transform: uppercase;
+      font-weight: 700; padding: 5px 14px; border-radius: 999px;
+      font-size: 11px; letter-spacing: 0.8px; text-transform: uppercase;
+    }
+    .conf-badge {
+      display: inline-block; margin-left: 8px; padding: 5px 12px;
+      background: #11141d; color: #9aa3b2; border-radius: 999px;
+      font-size: 11px; font-weight: 600;
     }
     .panel {
-      margin-top: 28px; padding: 20px;
+      margin-top: 16px; padding: 18px 20px;
       background: #11141d; border: 1px solid #2a3142; border-radius: 12px;
     }
-    .label { color: #9aa3b2; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
-    .value { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
-    .row + .row { margin-top: 14px; }
-    .codes li { font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: #ffd089; }
-    .actions { margin-top: 28px; display: flex; gap: 12px; flex-wrap: wrap; }
-    .btn {
-      padding: 10px 18px; border-radius: 8px; text-decoration: none; font-weight: 600;
-      cursor: pointer; border: 0;
+    .row { display: grid; grid-template-columns: 200px 1fr; gap: 12px; padding: 8px 0; }
+    .row + .row { border-top: 1px solid #1a1f2c; }
+    .label { color: #9aa3b2; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; padding-top: 2px; }
+    .value { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; font-size: 13px; }
+    .mono  { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+
+    /* Side-by-side screenshot comparison */
+    .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; }
+    .compare .col {
+      background: #06080c; border: 1px solid #2a3142; border-radius: 10px;
+      overflow: hidden; display: flex; flex-direction: column;
     }
-    .primary { background: #2a3142; color: #cfd4dd; }
+    .compare .col.bad  { border-color: #553e10; }
+    .compare .col.good { border-color: #2a4a30; }
+    .compare .col-head {
+      padding: 10px 14px; background: #11141d; border-bottom: 1px solid #2a3142;
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; font-weight: 700;
+    }
+    .compare .col.bad  .col-head { color: #ffc56b; }
+    .compare .col.good .col-head { color: #8cff9c; }
+    .compare img { width: 100%; max-height: 300px; object-fit: contain; display: block; background: #06080c; }
+    .compare .col-meta { padding: 8px 14px; font-size: 12px; color: #bcc3d0; border-top: 1px solid #1a1f2c; }
+    @media (max-width: 720px) { .compare { grid-template-columns: 1fr; } }
+
+    /* Verification checklist grid */
+    .checks { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    @media (max-width: 720px) { .checks { grid-template-columns: 1fr; } }
+    .check {
+      padding: 12px 14px; border-radius: 8px;
+      background: #11141d; border: 1px solid #2a3142;
+      display: grid; grid-template-columns: 28px 1fr; gap: 10px; align-items: start;
+    }
+    .check.fail   { border-color: #553030; background: #160f10; }
+    .check.warn   { border-color: #553e10; background: #1a1408; }
+    .check.pass   { border-color: #2a4a30; background: #0c1812; }
+    .check.unknown{ border-color: #2a3142; background: #0e111a; }
+    .check-icon { font-size: 18px; font-weight: 700; }
+    .check.fail    .check-icon { color: #ff6b6b; }
+    .check.warn    .check-icon { color: #ffc56b; }
+    .check.pass    .check-icon { color: #6cdc8a; }
+    .check.unknown .check-icon { color: #6f7787; }
+    .check-title { font-weight: 600; font-size: 13px; color: #e8eaed; }
+    .check-body  { color: #9aa3b2; font-size: 12px; margin-top: 2px; }
+
+    /* Signal cards */
+    .signal {
+      margin-top: 10px; padding: 14px 16px;
+      background: #11141d; border-left: 3px solid #faad14; border-radius: 6px;
+    }
+    .signal.sev-medium  { border-left-color: #faad14; }
+    .signal.sev-low     { border-left-color: #5e8bff; }
+    .signal.sev-high    { border-left-color: #ff6b6b; }
+    .signal.sev-critical { border-left-color: #ff4d4f; background: #1a0d0d; }
+    .signal-code  { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: #6f7787; text-transform: uppercase; letter-spacing: 0.3px; }
+    .signal-title { font-weight: 600; margin-top: 4px; font-size: 15px; }
+    .signal-body  { color: #bcc3d0; font-size: 13px; margin-top: 4px; }
+
+    .age-badge { display: inline-block; padding: 3px 10px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+    .age-badge.fresh { background: #3b1115; color: #ff6b6b; }
+    .age-badge.young { background: #3b2a11; color: #ffc56b; }
+    .age-badge.aged  { background: #0c1812; color: #6cdc8a; }
+    .provider-tag {
+      display: inline-block; padding: 3px 10px; margin: 3px 4px 3px 0;
+      background: #1a0d0d; color: #ff8c8c; border-radius: 4px;
+      font-size: 12px; font-weight: 600;
+    }
+
+    .actions { margin-top: 32px; display: flex; gap: 12px; flex-wrap: wrap; }
+    .btn { padding: 10px 18px; border-radius: 8px; font-weight: 600; cursor: pointer; border: 0; font-size: 14px; }
+    .primary { background: #5e8bff; color: white; }
     .ghost   { background: transparent; border: 1px solid #2a3142; color: #cfd4dd; }
-    .danger  { background: #4d2c2c; color: #ffb3b3; }
-    .danger:disabled { opacity: 0.4; cursor: not-allowed; }
+    .danger  { background: transparent; border: 1px solid #553030; color: #ff8c8c; }
+    .danger:disabled { opacity: 0.45; cursor: not-allowed; }
     .countdown { color: #ffc56b; font-weight: 700; }
+
+    .loading { color: #6f7787; font-size: 13px; padding: 16px 0; }
+    .empty   { color: #6f7787; font-size: 13px; padding: 8px 0; font-style: italic; }
+    .footer-meta { margin-top: 40px; color: #6f7787; font-size: 12px; }
   </style>
 </head>
 <body>
   <main class="wrap">
-    <span class="pill">Caution</span>
+    <div>
+      <span class="pill">Caution</span>
+      <span class="conf-badge" id="confBadge" hidden></span>
+    </div>
     <h1 id="title">This page has warning signs.</h1>
-    <p style="color:#bcc3d0; margin-top: 4px;" id="reason">
+    <p style="color:#bcc3d0; margin-top:4px; font-size:15px;" id="reason">
       XGenGuardian found suspicious signals but cannot confirm this page is malicious.
     </p>
 
-    <div class="panel">
-      <div class="row"><div class="label">URL</div><div class="value" id="url"></div></div>
-      <div class="row" id="codesRow" hidden>
-        <div class="label">Reasons</div>
-        <ul class="codes" id="codes"></ul>
+    <h2 id="compareHeader" hidden>Visual evidence</h2>
+    <div class="compare" id="compareGrid" hidden>
+      <div class="col bad">
+        <div class="col-head">This page (suspicious)</div>
+        <img id="badShot" alt="Suspicious page screenshot" />
+        <div class="col-meta" id="badMeta">Sandbox-captured</div>
       </div>
+      <div class="col good">
+        <div class="col-head" id="goodHead">Real brand reference</div>
+        <img id="goodShot" alt="Real brand reference screenshot" />
+        <div class="col-meta" id="goodMeta">Curated brand reference</div>
+      </div>
+    </div>
+
+    <h2>Why this triggered a warning</h2>
+    <div id="signals" class="loading">Fetching detailed evidence…</div>
+
+    <h2>Verification checklist</h2>
+    <div class="checks" id="checks"></div>
+
+    <h2>Page identity</h2>
+    <div class="panel">
+      <div class="row"><div class="label">Requested URL</div><div class="value" id="url"></div></div>
+      <div class="row" id="finalRow" hidden><div class="label">Final URL</div><div class="value" id="finalUrl"></div></div>
       <div class="row" id="brandRow" hidden>
         <div class="label">Visually similar to</div>
         <div class="value"><span id="brand"></span> &middot; similarity <span id="score"></span></div>
       </div>
+      <div class="row" id="pageClassRow" hidden>
+        <div class="label">Page class</div>
+        <div class="value" id="pageClass"></div>
+      </div>
+    </div>
+
+    <h2>Hosting + identity</h2>
+    <div class="panel">
+      <div class="row" id="ageRow" hidden>
+        <div class="label">Domain age</div>
+        <div class="value"><span class="age-badge" id="ageBadge"></span> <span id="ageDetail" style="color:#9aa3b2;"></span></div>
+      </div>
+      <div class="row" id="registrarRow" hidden><div class="label">Registrar</div><div class="value" id="registrar"></div></div>
+      <div class="row" id="asnRow" hidden><div class="label">Hosting ASN</div><div class="value" id="asn"></div></div>
+      <div class="row" id="certRow" hidden><div class="label">TLS issuer</div><div class="value" id="cert"></div></div>
+      <div class="row" id="vendorDNSRow" hidden>
+        <div class="label">Security DNS providers</div>
+        <div class="value" id="vendorDNS"></div>
+      </div>
     </div>
 
     <div class="actions">
-      <a class="primary" href="javascript:history.back()">Go back (recommended)</a>
-      <button class="danger" id="proceed" disabled>
+      <button class="btn primary" id="goBackBtn" type="button">Go back (recommended)</button>
+      <button class="btn danger" id="proceed" disabled>
         Proceed anyway <span class="countdown" id="cd">(5)</span>
       </button>
     </div>
 
-    <p style="margin-top:40px; color:#6f7787; font-size:12px;">
-      XGenGuardian &middot; "Proceed anyway" sends telemetry so we can refine this verdict.
+    <p class="footer-meta">
+      XGenGuardian &middot; evidence ID: <code id="evidenceIdFooter"></code><br />
+      &laquo;Proceed anyway&raquo; sends telemetry so detection can refine this verdict.
     </p>
   </main>
-
   <script src="warn.js"></script>
 </body>
 </html>

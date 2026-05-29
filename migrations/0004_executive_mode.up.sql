@@ -6,22 +6,22 @@
 -- Tenant-default strictness. Per-user value in users.paranoid_mode
 -- overrides; NULL there means "inherit tenant default".
 ALTER TABLE tenants
-  ADD COLUMN paranoid_mode BOOLEAN NOT NULL DEFAULT FALSE;
+  ADD COLUMN IF NOT EXISTS paranoid_mode BOOLEAN NOT NULL DEFAULT FALSE;
 
 ALTER TABLE users
-  ADD COLUMN paranoid_mode BOOLEAN;
+  ADD COLUMN IF NOT EXISTS paranoid_mode BOOLEAN;
 
 -- Warmup window: when a user first enables paranoid mode, treat B as A
 -- for 24 hours so the personal cache populates before the friction kicks
 -- in. Set to NOW() at enable time; reset to NULL at disable.
 ALTER TABLE users
-  ADD COLUMN paranoid_enabled_at TIMESTAMPTZ;
+  ADD COLUMN IF NOT EXISTS paranoid_enabled_at TIMESTAMPTZ;
 
 -- All overrides expire. No silent forever-allowlists. The §11.3 hard
 -- rule: paranoid users renew explicitly or lose the exception.
 ALTER TABLE overrides
-  ADD COLUMN expires_at TIMESTAMPTZ NOT NULL
+  ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NOT NULL
   DEFAULT (NOW() + INTERVAL '7 days');
 
-CREATE INDEX idx_overrides_expiry
+CREATE INDEX IF NOT EXISTS idx_overrides_expiry
   ON overrides (expires_at) WHERE expires_at IS NOT NULL;

@@ -19,14 +19,52 @@ from typing import Any  # noqa: F401
 
 import boto3
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import JSONResponse, Response as FastAPIResponse
 from playwright.async_api import async_playwright, Browser, Playwright
+from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST
 from pydantic import BaseModel, HttpUrl
 
 from .challenge import detect_challenge
+from .dom_inventory import (
+    _DOM_INVENTORY_JS,
+    IFrameFinding,
+    LinkFinding,
+    HiddenElementFinding,
+    SuspiciousJSFinding,
+    OverlayFinding,
+    parse_inventory,
+)
 from .downloads import FileFinding, fetch_and_hash, discover_links
 from .yara_scan import default_scanner, matches_to_dicts
 from .shellcmd import scan_commands as scan_shell_commands
+
+# ---------------------------------------------------------------------------
+# Prometheus metrics
+# ---------------------------------------------------------------------------
+
+render_total = Counter(
+    "xgg_render_total",
+    "Render outcomes labeled by result.",
+    ["result"],
+)
+
+render_latency = Histogram(
+    "xgg_render_latency_seconds",
+    "Render duration from request start to response.",
+    buckets=[0.5, 1, 2, 5, 10, 20, 30, 45, 60],
+)
+
+render_inflight = Gauge(
+    "xgg_render_semaphore_inflight",
+    "Number of renders currently in-flight (holding a semaphore slot).",
+)
+
+render_yara_matches = Counter(
+    "xgg_render_yara_matches_total",
+    "YARA rule matches during render, labeled by rule name.",
+    ["rule"],
+)
 
 # playwright-stealth — drops Playwright's automation tells (navigator.webdriver,
 # WebGL fingerprint, plugin list, etc.) so cloaking-aware kits and basic
@@ -40,6 +78,15 @@ except ImportError:  # pragma: no cover
     _STEALTH_AVAILABLE = False
     async def stealth_async(_page):  # type: ignore
         return None
+
+# Inter-service shared-secret authentication (Architecture Audit Finding #3).
+# Read once at module import; an empty value disables the check (dev mode).
+_INTERNAL_TOKEN: str = os.getenv("XGG_INTERNAL_TOKEN", "")
+if not _INTERNAL_TOKEN:
+    import logging
+    logging.getLogger(__name__).warning(
+        "XGG_INTERNAL_TOKEN is not set — inter-service auth DISABLED (dev mode)"
+    )
 
 S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://localhost:9000")
 S3_BUCKET = os.getenv("S3_BUCKET", "xgg-evidence")
@@ -92,6 +139,30 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="xgg-sandbox-render", lifespan=lifespan)
+
+
+@app.get("/metrics")
+async def metrics_endpoint() -> FastAPIResponse:
+    """Prometheus metrics scrape endpoint. No authentication required."""
+    return FastAPIResponse(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+@app.middleware("http")
+async def internal_auth_middleware(request: Request, call_next) -> Response:
+    """Validate X-Internal-Token on every request except /healthz.
+
+    When XGG_INTERNAL_TOKEN is unset the check is skipped (dev mode).
+    When set, any missing or mismatched token returns 401 Unauthorized.
+    Uses secrets.compare_digest to prevent timing-oracle attacks.
+    """
+    if request.url.path not in ("/healthz", "/metrics") and _INTERNAL_TOKEN:
+        import secrets
+
+        provided = request.headers.get("X-Internal-Token", "")
+        if not secrets.compare_digest(provided, _INTERNAL_TOKEN):
+            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+    return await call_next(request)
+
 
 s3 = boto3.client(
     "s3",
@@ -181,6 +252,14 @@ class RenderResponse(BaseModel):
     # rundll32 over UNC, mshta + remote HTA, the `&` separator trick, base64
     # piped to zsh, PowerShell IEX cradles. Empty dict on clean pages.
     shellcmd: dict[str, Any] = {}
+    # DOM inventory — comprehensive link, iframe, hidden-element, suspicious-JS,
+    # and overlay/clickjack findings extracted in a single in-page JS pass after
+    # render settles. See UNIFIED-PLAN.md §18.3.
+    links: list[LinkFinding] = []
+    iframes: list[IFrameFinding] = []
+    hidden_elements: list[HiddenElementFinding] = []
+    suspicious_js: list[SuspiciousJSFinding] = []
+    overlays: list[OverlayFinding] = []
 
 
 @app.get("/healthz")
@@ -204,14 +283,28 @@ async def render(req: RenderRequest) -> RenderResponse:
     try:
         await asyncio.wait_for(sem.acquire(), timeout=RENDER_QUEUE_TIMEOUT_S)
     except asyncio.TimeoutError:
+        render_total.labels(result="failure").inc()
         raise HTTPException(
             status_code=429,
             detail=f"render queue full (pool={req.pool})",
             headers={"X-Render-Queue-Full": req.pool},
         )
+    render_inflight.inc()
+    _t0 = time.time()
     try:
-        return await _do_render(req)
+        result = await _do_render(req)
+        render_total.labels(result="success").inc()
+        render_latency.observe(time.time() - _t0)
+        # Count YARA matches by rule name.
+        for match in result.yara_matches:
+            render_yara_matches.labels(rule=match.rule).inc()
+        return result
+    except Exception:
+        render_total.labels(result="failure").inc()
+        render_latency.observe(time.time() - _t0)
+        raise
     finally:
+        render_inflight.dec()
         sem.release()
 
 
@@ -627,11 +720,39 @@ async def _do_render(req: RenderRequest) -> RenderResponse:
                 )
             )
 
-        # Upload artifacts.
+        # Upload artifacts. boto3 is synchronous; wrap in to_thread so multi-MB
+        # screenshot/DOM uploads don't block the event loop (Finding #10).
         ss_key  = f"{evidence_id}/screenshot.png"
         dom_key = f"{evidence_id}/dom.html"
-        s3.put_object(Bucket=S3_BUCKET, Key=ss_key, Body=screenshot_bytes, ContentType="image/png")
-        s3.put_object(Bucket=S3_BUCKET, Key=dom_key, Body=html.encode("utf-8"), ContentType="text/html")
+        await asyncio.to_thread(
+            s3.put_object, Bucket=S3_BUCKET, Key=ss_key,
+            Body=screenshot_bytes, ContentType="image/png",
+        )
+        await asyncio.to_thread(
+            s3.put_object, Bucket=S3_BUCKET, Key=dom_key,
+            Body=html.encode("utf-8"), ContentType="text/html",
+        )
+
+        # Generate 15-minute pre-signed GET URLs (Audit Finding #2 — no public bucket).
+        # Verdict-api stores these URLs in evidence.screenshot_url / dom_url.
+        # They expire after 900s; portal-api re-signs at view time using the
+        # s3:// URI stored in those fields (see portal-api TODO comment).
+        # generate_presigned_url is synchronous (local signing, no network I/O
+        # with most SDK versions) but wrap in to_thread for consistency and
+        # safety against future SDK versions that may call the endpoint.
+        _presign_ttl = 900
+        screenshot_url = await asyncio.to_thread(
+            s3.generate_presigned_url,
+            "get_object",
+            Params={"Bucket": S3_BUCKET, "Key": ss_key},
+            ExpiresIn=_presign_ttl,
+        )
+        dom_url = await asyncio.to_thread(
+            s3.generate_presigned_url,
+            "get_object",
+            Params={"Bucket": S3_BUCKET, "Key": dom_key},
+            ExpiresIn=_presign_ttl,
+        )
 
         # Discover downloadable / risky links via DOM eval and regex fallback.
         discovered = await page.evaluate(
@@ -684,6 +805,19 @@ async def _do_render(req: RenderRequest) -> RenderResponse:
         except Exception:
             sink_raw = {}
 
+        # DOM inventory — links, iframes, hidden elements, suspicious JS, overlays.
+        # Single page.evaluate() running the pre-built JS; result is parsed into
+        # typed Pydantic models. Bypassed on challenge pages (body is just the
+        # captcha wall; nothing meaningful to inventory). Wrapped in try so any
+        # JS exception or Playwright error degrades to empty lists, not a crash.
+        inventory_raw: dict[str, Any] = {}
+        if not is_challenge:
+            try:
+                inventory_raw = await page.evaluate(_DOM_INVENTORY_JS) or {}
+            except Exception:
+                inventory_raw = {}
+        inventory = parse_inventory(inventory_raw)
+
         # Belt-and-suspenders close — if anything in the screenshot/sink/YARA
         # path raised before this point, the request handler will propagate the
         # exception and ctx must still be released. Wrapping the whole post-goto
@@ -702,8 +836,18 @@ async def _do_render(req: RenderRequest) -> RenderResponse:
             with open(har_path, "rb") as fh:
                 har_bytes = fh.read()
             har_key = f"{evidence_id}/network.har"
-            s3.put_object(Bucket=S3_BUCKET, Key=har_key, Body=har_bytes, ContentType="application/json")
-            har_url = f"{S3_PUBLIC_BASE}/{har_key}"
+            # HAR files can be large (many network requests); upload off-thread
+            # for the same reason as screenshot/DOM (Finding #10).
+            await asyncio.to_thread(
+                s3.put_object, Bucket=S3_BUCKET, Key=har_key,
+                Body=har_bytes, ContentType="application/json",
+            )
+            har_url = await asyncio.to_thread(
+                s3.generate_presigned_url,
+                "get_object",
+                Params={"Bucket": S3_BUCKET, "Key": har_key},
+                ExpiresIn=_presign_ttl,
+            )
             os.unlink(har_path)
         except FileNotFoundError:
             pass
@@ -735,8 +879,8 @@ async def _do_render(req: RenderRequest) -> RenderResponse:
 
         return RenderResponse(
             evidence_id=evidence_id,
-            screenshot_url=f"{S3_PUBLIC_BASE}/{ss_key}",
-            dom_url=f"{S3_PUBLIC_BASE}/{dom_key}",
+            screenshot_url=screenshot_url,
+            dom_url=dom_url,
             har_url=har_url or None,
             favicon_url=favicon_url,
             final_url=final_url,
@@ -753,6 +897,11 @@ async def _do_render(req: RenderRequest) -> RenderResponse:
             post_message_count=pm_count,
             sink=sink_raw,
             shellcmd=shellcmd_result,
+            links=inventory["links"],
+            iframes=inventory["iframes"],
+            hidden_elements=inventory["hidden_elements"],
+            suspicious_js=inventory["suspicious_js"],
+            overlays=inventory["overlays"],
         )
     finally:
         try:

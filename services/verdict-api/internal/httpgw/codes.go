@@ -49,6 +49,9 @@ var signalToCode = map[string]reasons.Code{
 	// DGA classifier (this pipeline-push).
 	"dga_classifier_hit": reasons.DGAClassifierHit,
 
+	// Random-host heuristic (Tier-1 parallel signal).
+	"random_host": reasons.RandomHostname,
+
 	// Direct-download URL — Chromium can't render, fallback signal.
 	"direct_download_url": reasons.RiskyDownloadLinked,
 

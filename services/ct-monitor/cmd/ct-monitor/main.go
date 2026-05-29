@@ -295,9 +295,16 @@ func matches(domain string, keywords []string) (string, bool) {
 		if k == "" {
 			continue
 		}
-		if strings.Contains(core, k) && core != k {
+		// Contains check has no core!=k guard: an exact label match (e.g.
+		// core=="paypal", k=="paypal") is a true positive and must be flagged
+		// (Finding #14). The canonical-brand false-positive is handled by
+		// brands.canonical_domains filtering in the downstream classifier.
+		if strings.Contains(core, k) {
 			return k, true
 		}
+		// Levenshtein branch keeps the guard: edit-distance 0 means exact
+		// equality which is already caught by Contains above, and the
+		// canonical-domain suppression hasn't run yet here.
 		if levenshtein(core, k) <= 2 && core != k {
 			return k, true
 		}

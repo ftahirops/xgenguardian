@@ -15,9 +15,46 @@
 
 // Operator's VPS — UFW restricts inbound 18080 to trusted IPs only.
 // Override via the Options page when running against a different deployment.
-const DEFAULT_API   = "http://135.181.79.11:18080";
+//
+// SECURITY NOTE: the default endpoint is plaintext HTTP. This is a known
+// MITM risk (audit FINDING #3 — CRITICAL): an attacker on the user's
+// network path can return { verdict: "ALLOW" } for any URL, neutralizing
+// the extension silently. The right long-term fix is to put nginx + Let's
+// Encrypt in front of verdict-api and switch this default to https://.
+// Until then, validateAPIBase rejects everything OTHER than http(s):// so
+// javascript:/data:/file:/chrome: schemes cannot reach fetch(), and
+// fetchVerdict warns loudly on every HTTP call so the operator is aware.
+const DEFAULT_API       = "http://135.181.79.11:18080";
+const DEFAULT_PORTAL_API = "http://135.181.79.11:18081";
+
+// validateAPIBase — accept only http(s):// URLs. Returns null when the
+// input is anything else (javascript:, data:, file:, chrome:, blob:, etc.)
+// so the caller fails closed instead of fetching from an attacker-supplied
+// scheme. Used to gate apiBase / portalApiBase reads.
+function validateAPIBase(s) {
+  if (typeof s !== "string") return null;
+  const u = s.trim();
+  if (!/^https?:\/\/[^\s]+$/i.test(u)) return null;
+  return u.replace(/\/+$/, ""); // strip trailing slash
+}
+
+// Module-level "already warned" flag so we don't spam the console on every
+// fetch. Reset on service-worker restart, which is fine — one warning per
+// SW lifetime is enough to notify the operator.
+let _warnedAboutHTTP = false;
+function warnIfInsecure(u) {
+  if (u.startsWith("http://") && !_warnedAboutHTTP) {
+    _warnedAboutHTTP = true;
+    console.warn(
+      "[xgg] verdict-api is configured over plaintext HTTP (" + u + "). " +
+      "A network-path attacker can return ALLOW for any URL. " +
+      "Use HTTPS in production — see README for the nginx + Let's Encrypt setup."
+    );
+  }
+}
 const ALLOW_TTL_MS  = 5 * 60 * 1000;
 const BLOCK_TTL_MS  = 60 * 60 * 1000;
+const WARN_TTL_MS   = 30 * 60 * 1000; // WARN/ISOLATE — longer than ALLOW, shorter than BLOCK
 const VERDICT_TIMEOUT_MS = 4000;
 
 // URL substring → page_class. Order matters (first match wins).
@@ -32,14 +69,53 @@ const SENSITIVE_PATTERNS = [
 
 // ---------- helpers ----------
 
+// settings() — single source of truth for user preferences. ALL reads and
+// writes across the extension (background.js, popup.js, blocked.js,
+// isolate.js, options.js) MUST go through chrome.storage.local so updates
+// in any surface are visible to every other surface.
+//
+// History: previously this code used chrome.storage.sync while options.js
+// used chrome.storage.local — the two stores never communicated, so EVERY
+// setting the user changed in Options was silently ignored. Found in the
+// audit (FINDING #7). All references migrated below.
+//
+// Module-level cache (FINDING #22): every navigation previously caused a
+// full chrome.storage.local.get round-trip. The MV3 service worker lives
+// only ~30 s between events; a cache valid for that lifetime eliminates
+// redundant reads without risking stale values surviving a restart.
+let _settingsCache = null;
+let _settingsCacheAt = 0;
+const SETTINGS_CACHE_TTL_MS = 30 * 1000;
+
+// Invalidate whenever the user changes any setting — storage.onChanged fires
+// synchronously in the same SW activation as the write, so the next read
+// after a settings change will always fetch fresh values.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local") {
+    _settingsCache = null;
+  }
+});
+
 async function settings() {
-  return chrome.storage.sync.get({
+  if (_settingsCache && Date.now() - _settingsCacheAt < SETTINGS_CACHE_TTL_MS) {
+    return _settingsCache;
+  }
+  _settingsCache = await chrome.storage.local.get({
     apiBase:        DEFAULT_API,
+    portalApiBase:  DEFAULT_PORTAL_API,
     enabled:        true,
     enforceWarn:    false,
     telemetry:      true,
-    paranoidMode:   false, // Executive Mode toggle (§4.4)
+    mode:           "safe",
+    categories:     {
+      adult: true, popunder: true, gambling: false, piracy: false,
+      crack_keygen: false, malvertising: true, unknown_sensitive_isolate: false,
+    },
+    paranoidMode:   false, // legacy Executive Mode toggle (§4.4)
+    userAllowlist:  "",    // permanent allowlist; see parseAllowlist()
   });
+  _settingsCacheAt = Date.now();
+  return _settingsCache;
 }
 
 async function sha256(text) {
@@ -59,37 +135,382 @@ function isSensitive(url) {
   return pageClassOf(url) !== "generic";
 }
 
+// WELL_KNOWN_AUTH_HOSTS — high-trust authentication providers that we
+// intentionally pass through without scanning. Two reasons:
+//
+//   1. These are the brands phishing campaigns IMPERSONATE. The real
+//      hostnames (e.g. accounts.google.com) are inherently trusted; an
+//      attacker hosting a fake Google login is on a *different* host
+//      that we DO scan.
+//
+//   2. OAuth handshakes are timing- and state-sensitive. A holding-page
+//      redirect between the OAuth init and the provider's challenge
+//      page breaks flows where the parent window is waiting for a
+//      specific popup-window state (Tailscale → Google, Slack → Apple,
+//      etc.). The intermediate `tabs.update` to chrome-extension://
+//      kills cross-window handles and prevents the parent from observing
+//      the callback completing.
+//
+// We use full-hostname matches and explicit subdomain entries instead
+// of suffix matching so an attacker can't register e.g.
+// `accounts.google.com.evil.tld` and slip through.
+const WELL_KNOWN_AUTH_HOSTS = new Set([
+  // Google
+  "accounts.google.com", "oauth2.googleapis.com", "myaccount.google.com",
+  "ssl.gstatic.com",
+  // Microsoft
+  "login.microsoftonline.com", "login.live.com", "login.microsoft.com",
+  "login.windows.net", "account.microsoft.com", "account.live.com",
+  // Microsoft Safe Links — enterprise Outlook wraps every email link
+  // through this service. Always redirects to the actual destination;
+  // intercepting the wrapper just adds delay + breaks the redirect
+  // chain. The destination URL itself is checked when the browser
+  // follows the 302. ind01/eur02/nam02/etc. are regional prefixes.
+  "safelinks.protection.outlook.com",
+  "nam01.safelinks.protection.outlook.com",
+  "nam02.safelinks.protection.outlook.com",
+  "nam03.safelinks.protection.outlook.com",
+  "nam04.safelinks.protection.outlook.com",
+  "nam06.safelinks.protection.outlook.com",
+  "nam10.safelinks.protection.outlook.com",
+  "nam11.safelinks.protection.outlook.com",
+  "nam12.safelinks.protection.outlook.com",
+  "eur01.safelinks.protection.outlook.com",
+  "eur02.safelinks.protection.outlook.com",
+  "eur03.safelinks.protection.outlook.com",
+  "eur04.safelinks.protection.outlook.com",
+  "eur05.safelinks.protection.outlook.com",
+  "ind01.safelinks.protection.outlook.com",
+  "apc01.safelinks.protection.outlook.com",
+  "jpn01.safelinks.protection.outlook.com",
+  "aus01.safelinks.protection.outlook.com",
+  "can01.safelinks.protection.outlook.com",
+  "gbr01.safelinks.protection.outlook.com",
+  // Microsoft invitations / B2B redeem flow (the destination of safelinks)
+  "invitations.microsoft.com", "myapplications.microsoft.com",
+  // Proofpoint URL Defense — used by enterprise mail filters; same flow
+  // as safelinks. The destination is encoded in the URL parameter.
+  "urldefense.proofpoint.com", "urldefense.com",
+  // Cisco Secure Email (was IronPort) URL rewriting
+  "secure-web.cisco.com", "linkprotect.cudasvc.com",
+  // Symantec / Broadcom Email Security
+  "clicktime.symantec.com", "click.email.symantec.com",
+  // Mimecast email security
+  "protect-eu.mimecast.com", "protect-us.mimecast.com",
+  "protect-au.mimecast.com", "protect.mimecast.com",
+  // Barracuda
+  "linkprotect.cudasvc.com",
+  // Sophos / Reflexion
+  "url.emailprotection.link", "messages.reflexion.net",
+  // Apple
+  "appleid.apple.com", "idmsa.apple.com",
+  // GitHub
+  "github.com",       // /login/oauth/* — domain is trusted as a whole
+  "api.github.com",
+  // GitLab / Bitbucket / Atlassian
+  "gitlab.com", "bitbucket.org", "id.atlassian.com", "auth.atlassian.com",
+  // Okta / Auth0 / Duo / OneLogin (these are tenant-prefixed so we let
+  // the trustreg + brand-host graph on the server decide; only block
+  // page bypass on the canonical SSO domains here)
+  "duosecurity.com", "duo.com", "duosecurity.net",
+  // Slack, Discord, Notion, Linear, Figma, Vercel auth surfaces
+  "slack.com", "discord.com", "notion.so", "linear.app", "figma.com",
+  "vercel.com",
+  // Cloud-provider consoles (these are not phishing targets at the
+  // provider's own canonical domain; their tenant subdomains may be
+  // and remain scanned at the brandgraph layer).
+  "console.cloud.google.com", "console.aws.amazon.com",
+  "portal.azure.com", "signin.aws.amazon.com",
+]);
+
+function isWellKnownAuthHost(hostname) {
+  return WELL_KNOWN_AUTH_HOSTS.has(hostname);
+}
+
 function shouldSkipURL(url) {
   if (!/^https?:/.test(url)) return true;
   if (url.startsWith(chrome.runtime.getURL(""))) return true;
+  // chrome-error://, chrome://, view-source:, about:, etc. — these are
+  // internal browser pages. Crucially, chrome-error://chromewebdata/...
+  // is what Chrome shows when DNS fails / connection refused. Without
+  // this skip, our extension intercepts the error page itself, queues
+  // a verdict request, then when the user retries we re-loop. Skipping
+  // here breaks the cycle and lets Chrome's native error UI stand.
+  if (/^chrome-?(error|search|untrusted|extension)?:|^view-source:|^about:|^edge:|^file:|^data:|^javascript:|^blob:|^opera:|^vivaldi:/i.test(url)) return true;
   try {
     const u = new URL(url);
     if (["localhost", "127.0.0.1", "::1"].includes(u.hostname)) return true;
     // Skip private network ranges so internal corp tools don't get held.
     if (/^10\.|^192\.168\.|^172\.(1[6-9]|2[0-9]|3[01])\./.test(u.hostname)) return true;
+    // Pass well-known auth providers through untouched (see comment on
+    // WELL_KNOWN_AUTH_HOSTS for the OAuth-flow rationale).
+    if (isWellKnownAuthHost(u.hostname)) return true;
   } catch { return true; }
   return false;
 }
 
+// Two-tier verdict cache (audit FINDING #21):
+//
+//   Tier 1 — chrome.storage.session: fast, cleared on browser restart.
+//   Tier 2 — chrome.storage.local for BLOCK verdicts only: persistent
+//            across browser restarts so a known-bad URL stays blocked
+//            for the full BLOCK_TTL_MS window even if the user restarts
+//            Chrome mid-window.
+//
+// ALLOW/WARN/ISOLATE entries live only in session storage. Their TTLs are
+// short enough (5min / 30min) that the post-restart re-check is fine.
+// BLOCK entries (1h TTL) are mirrored to local so the protective decision
+// survives restarts — phishing campaigns don't get a fresh shot every time
+// the user closes their browser.
 async function getCached(key) {
   const got = await chrome.storage.session.get(key);
-  const e = got[key];
-  if (!e) return null;
-  const ttl = e.v?.verdict === "BLOCK" ? BLOCK_TTL_MS : ALLOW_TTL_MS;
-  if (Date.now() - e.t > ttl) return null;
+  let e = got[key];
+  if (!e) {
+    // Tier-2 fallback: check persistent BLOCK cache.
+    const localKey = "bl:" + key;
+    const localGot = await chrome.storage.local.get(localKey);
+    e = localGot[localKey];
+    if (!e) return null;
+  }
+  let ttl;
+  switch (e.v?.verdict) {
+    case "BLOCK":   ttl = BLOCK_TTL_MS; break;
+    case "WARN":
+    case "ISOLATE": ttl = WARN_TTL_MS;  break;
+    default:        ttl = ALLOW_TTL_MS;
+  }
+  if (Date.now() - e.t > ttl) {
+    // Stale — best-effort cleanup of the persistent copy if present.
+    chrome.storage.local.remove("bl:" + key).catch(() => {});
+    return null;
+  }
   return e.v;
 }
 
 async function setCached(key, verdict) {
-  await chrome.storage.session.set({ [key]: { v: verdict, t: Date.now() } });
+  const entry = { v: verdict, t: Date.now() };
+  await chrome.storage.session.set({ [key]: entry });
+  // Mirror BLOCK verdicts to persistent storage (Tier-2).
+  if (verdict?.verdict === "BLOCK") {
+    await chrome.storage.local.set({ ["bl:" + key]: entry });
+  }
+}
+
+// --- "just verified" pass-through ---
+//
+// Sensitive URLs (login, payment, oauth, admin) intentionally bypass the
+// long-lived verdict cache so we re-evaluate every visit. But after the
+// holding page applies an ALLOW verdict via tabs.update(target), Chrome
+// fires onBeforeNavigate for `target` again — which would route us right
+// back to holding, creating an infinite reload loop on every login page.
+//
+// Solution: when we APPLY an ALLOW verdict, stamp a short-lived (10s)
+// pass token for the exact URL. onBeforeNavigate consumes it once and
+// lets that single navigation through, then the token expires and normal
+// re-verify behavior resumes for subsequent visits.
+const JUST_VERIFIED_TTL_MS = 10 * 1000;
+
+// normalizeForToken — strip fragment and trailing slash before hashing.
+// Chrome's webNavigation events may strip the fragment, causing a mismatch
+// between the URL stamped at apply time and the URL seen at navigate time
+// (FINDING #24). Normalizing both sides ensures the token is always found.
+function normalizeForToken(url) {
+  try {
+    const u = new URL(url);
+    u.hash = "";
+    return u.toString().replace(/\/+$/, "");
+  } catch {
+    return url.split("#")[0].replace(/\/+$/, "");
+  }
+}
+
+async function stampJustVerified(url) {
+  const key = "jv:" + (await sha256(normalizeForToken(url)));
+  await chrome.storage.session.set({ [key]: Date.now() });
+}
+
+async function consumeJustVerified(url) {
+  const key = "jv:" + (await sha256(normalizeForToken(url)));
+  const got = await chrome.storage.session.get(key);
+  const t = got[key];
+  if (!t) return false;
+  // One-shot: remove immediately so we re-verify next time.
+  await chrome.storage.session.remove(key);
+  return (Date.now() - t) <= JUST_VERIFIED_TTL_MS;
+}
+
+// --- Ultra mode: 24h ALLOW_TEMP per-host override ---
+//
+// When the user clicks "Allow for 24h" on the isolation page, the host
+// is stored here. The 24h cache lives in chrome.storage.local so it
+// survives browser restart. On every navigation we check this cache
+// FIRST — if the host is on the allowlist and the TTL hasn't expired,
+// we return ALLOW without calling verdict-api.
+//
+// Scope is per HOSTNAME (not per URL) — once a user trusts mybank.com,
+// every path on mybank.com bypasses verdict during the window.
+const ALLOW_TEMP_TTL_MS = 24 * 60 * 60 * 1000;
+
+// --- User-managed permanent allowlist ---
+//
+// Comma/newline-separated entries the user added in Options. Supports four
+// match types:
+//   exact hostname:  "opencode.ai"
+//   suffix match:    ".mycorp.com"   (matches any subdomain of mycorp.com)
+//   exact IP:        "135.181.79.27" (port-agnostic)
+//   CIDR block:      "10.0.0.0/8"
+//
+// Matched URLs bypass ALL scanning — no holding page, no verdict-api call,
+// nothing. This is the relief valve for self-hosted / dev tools / corp
+// intranets that the operator wants to permanently trust.
+function parseAllowlist(raw) {
+  if (!raw) return { hosts: new Set(), suffixes: [], ips: new Set(), cidrs: [] };
+  const hosts = new Set();
+  const suffixes = [];
+  const ips = new Set();
+  const cidrs = [];
+  for (const line of raw.split(/[\r\n,]+/)) {
+    const t = line.trim().toLowerCase();
+    if (!t || t.startsWith("#")) continue;
+    if (t.includes("/") && /^[\d.]+\/\d+$/.test(t)) {
+      cidrs.push(t);
+    } else if (/^\d{1,3}(\.\d{1,3}){3}$/.test(t)) {
+      ips.add(t);
+    } else if (t.startsWith(".")) {
+      suffixes.push(t);
+    } else {
+      hosts.add(t);
+    }
+  }
+  return { hosts, suffixes, ips, cidrs };
+}
+
+function ipInCIDR(ip, cidr) {
+  try {
+    const [base, bitsStr] = cidr.split("/");
+    const bits = parseInt(bitsStr, 10);
+    if (!Number.isFinite(bits) || bits < 0 || bits > 32) return false;
+    const toInt = (s) => s.split(".").reduce((a, o) => (a << 8) + (+o), 0) >>> 0;
+    const ipi = toInt(ip);
+    const basei = toInt(base);
+    const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+    return (ipi & mask) === (basei & mask);
+  } catch { return false; }
+}
+
+async function isUserAllowlisted(url) {
+  let host;
+  try { host = new URL(url).hostname.toLowerCase(); } catch { return false; }
+  const cfg = await settings();
+  const list = parseAllowlist(cfg.userAllowlist || "");
+  if (list.hosts.has(host)) return true;
+  for (const sfx of list.suffixes) {
+    if (host === sfx.slice(1) || host.endsWith(sfx)) return true;
+  }
+  if (list.ips.has(host)) return true;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
+    for (const c of list.cidrs) {
+      if (ipInCIDR(host, c)) return true;
+    }
+  }
+  return false;
+}
+
+async function isAllowTemp(url) {
+  try {
+    const host = new URL(url).hostname;
+    if (!host) return false;
+    const key = "at:" + host;
+    const got = await chrome.storage.local.get(key);
+    const t = got[key];
+    if (!t) return false;
+    if (Date.now() - t > ALLOW_TEMP_TTL_MS) {
+      chrome.storage.local.remove(key).catch(() => {});
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function setAllowTemp(url) {
+  try {
+    const host = new URL(url).hostname;
+    if (!host) return;
+    await chrome.storage.local.set({ ["at:" + host]: Date.now() });
+  } catch {}
+}
+
+// ---------- Phase B: browser remote-IP capture ----------
+//
+// Connection identity (docs/final-engine-architecture-plan.md §6-8) requires
+// the *actual* IP the browser connected to — not what the backend resolver
+// would have answered. Backend-only DNS misses local hijack, router
+// compromise, VPN DNS override, hosts-file tampering, and browser DoH bypass.
+//
+// chrome.webRequest.onResponseStarted provides details.ip for the main_frame
+// request, which is the IP the browser actually reached. We cache it keyed by
+// host and read it back in fetchVerdict.
+//
+// Cache shape: { host: { ip, ts } }. Entries older than HOST_IP_TTL_MS are
+// ignored. The map is bounded by HOST_IP_MAX_ENTRIES via FIFO eviction so a
+// long-lived service worker can't grow it unbounded.
+const HOST_IP_TTL_MS = 5 * 60 * 1000;
+const HOST_IP_MAX_ENTRIES = 256;
+const hostRemoteIP = new Map(); // insertion-ordered → FIFO eviction
+function rememberHostIP(host, ip) {
+  if (!host || !ip) return;
+  if (hostRemoteIP.size >= HOST_IP_MAX_ENTRIES) {
+    // Drop oldest entry.
+    const oldest = hostRemoteIP.keys().next().value;
+    if (oldest !== undefined) hostRemoteIP.delete(oldest);
+  }
+  // Re-insert to refresh insertion order.
+  hostRemoteIP.delete(host);
+  hostRemoteIP.set(host, { ip, ts: Date.now() });
+}
+function recentRemoteIP(host) {
+  const e = hostRemoteIP.get(host);
+  if (!e) return "";
+  if (Date.now() - e.ts > HOST_IP_TTL_MS) {
+    hostRemoteIP.delete(host);
+    return "";
+  }
+  return e.ip || "";
+}
+try {
+  // main_frame only — the IP we care about for connection identity is the
+  // one serving the document the user is on. Subresource IPs are noise.
+  chrome.webRequest.onResponseStarted.addListener(
+    (details) => {
+      try {
+        if (details.type !== "main_frame") return;
+        const host = new URL(details.url).hostname;
+        if (details.ip) rememberHostIP(host, details.ip);
+      } catch {}
+    },
+    { urls: ["<all_urls>"], types: ["main_frame"] }
+  );
+} catch {
+  // webRequest may be unavailable in some test harnesses; degrade silently.
 }
 
 async function fetchVerdict(url, opener) {
   const cfg = await settings();
+  // FAIL-SAFE scheme gate (audit FINDING #3). Reject any non-http(s)://
+  // apiBase before it reaches fetch(). Without this, a malicious or
+  // misconfigured value like javascript: or file:// could be used as the
+  // request base, with surprising consequences.
+  const apiBase = validateAPIBase(cfg.apiBase);
+  if (!apiBase) {
+    return { verdict: "ANALYZING", error: "invalid apiBase configured" };
+  }
+  warnIfInsecure(apiBase);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), VERDICT_TIMEOUT_MS);
   try {
-    const r = await fetch(`${cfg.apiBase}/v1/check`, {
+    const r = await fetch(`${apiBase}/v1/check`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -99,6 +520,10 @@ async function fetchVerdict(url, opener) {
         paranoid: (cfg.mode === "paranoid") || cfg.paranoidMode || undefined,
         mode: cfg.mode || "normal",
         categories: cfg.categories || undefined,
+        browser_remote_ip: (() => {
+          try { return recentRemoteIP(new URL(url).hostname) || undefined; }
+          catch { return undefined; }
+        })(),
       }),
       signal: ctrl.signal,
     });
@@ -125,12 +550,38 @@ function pageFor(verdict) {
 function interstitialURL(page, target, verdict, opener) {
   const p = new URLSearchParams();
   p.set("u", target);
+  if (verdict.verdict)           p.set("v", verdict.verdict);
   if (verdict.block_reason)      p.set("r", verdict.block_reason);
   if (verdict.evidence_id)       p.set("e", verdict.evidence_id);
   if (verdict.visual_top_brand)  p.set("b", verdict.visual_top_brand);
   if (verdict.visual_top_score)  p.set("s", String(verdict.visual_top_score));
   if (Array.isArray(verdict.reason_codes)) p.set("c", verdict.reason_codes.join(","));
   if (opener)                    p.set("op", opener);
+  // Phase B.6: pass connection-identity facts as query params so the
+  // blocked page can render them without a portal round-trip. The full
+  // record (ASN, CNAME chain, ledger entries) stays in evidence storage;
+  // these are just the headline facts we already have on hand.
+  if (verdict.connection_identity) {
+    const ci = verdict.connection_identity;
+    if (ci.browser_remote_ip)  p.set("cip", ci.browser_remote_ip);
+    if (Array.isArray(ci.xgg_resolver_ips_for_client) && ci.xgg_resolver_ips_for_client.length) {
+      p.set("xip", ci.xgg_resolver_ips_for_client.join(","));
+    }
+    if (ci.dns_path_consistent) p.set("dpc", "1");
+  }
+  // Phase D.3: trust score + contributors. Score 0 means "not computed";
+  // anything > 0 renders the trust panel. Contributors are encoded as
+  // "label1:w1|label2:w2|..." — labels are short and stable so URL length
+  // stays bounded.
+  if (typeof verdict.trust_score === "number" && verdict.trust_score > 0) {
+    p.set("ts", verdict.trust_score.toFixed(2));
+    if (Array.isArray(verdict.trust_contributors) && verdict.trust_contributors.length) {
+      const enc = verdict.trust_contributors
+        .map(c => `${(c.label || "").replace(/\|/g, "/")}:${(c.weight || 0).toFixed(2)}`)
+        .join("|");
+      p.set("tc", enc);
+    }
+  }
   return chrome.runtime.getURL(`src/${page}`) + "?" + p.toString();
 }
 
@@ -147,6 +598,12 @@ async function applyVerdict(tabId, target, verdict, opener) {
   const page = pageFor(verdict);
   if (!page) {
     // ALLOW or ANALYZING-with-cached-allow → release to the real URL.
+    // Stamp a "just verified" pass token so the imminent onBeforeNavigate
+    // for `target` (Chrome fires it again after tabs.update) lets that
+    // single navigation through instead of looping back to holding. This
+    // is the only thing that breaks the reload loop on sensitive URLs,
+    // which intentionally bypass the long-lived verdict cache.
+    await stampJustVerified(target);
     await chrome.tabs.update(tabId, { url: target });
     return;
   }
@@ -165,6 +622,29 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
   if (!cfg.enabled) return;
 
   const url = details.url;
+
+  // "Just verified" one-shot — consume the token and let this exact
+  // navigation through. Applies to ALL URLs (sensitive included) because
+  // the token was minted by applyVerdict immediately before tabs.update.
+  // Without this, sensitive URLs reload-loop because they skip the
+  // long-lived verdict cache.
+  if (await consumeJustVerified(url)) return;
+
+  // Ultra-mode user override: when the user clicked "Allow for 24h" on
+  // the isolation page, every URL on that host bypasses verdict for the
+  // window. Honored in all modes (not just Ultra) since the user is
+  // explicit about it.
+  if (await isAllowTemp(url)) return;
+
+  // Permanent user allowlist (Options page): if the user explicitly trusts
+  // this host/IP, bypass scanning entirely. Highest-priority short-circuit
+  // (alongside the 24h temp allow). This is what the user uses to permanently
+  // whitelist their own self-hosted infrastructure (e.g. 135.181.79.27) or
+  // dev tools (e.g. opencode.ai) that the verdict-api would otherwise WARN
+  // on due to credential-sink / hidden-link heuristics tuned for the wider
+  // public web.
+  if (await isUserAllowlisted(url)) return;
+
   const sensitive = isSensitive(url);
   const key = "v:" + (await sha256(url));
 
@@ -194,6 +674,71 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
     });
   } catch (e) {
     console.warn("[xgg] holding redirect rejected (likely network-level block on", url, "):", e?.message || e);
+  }
+});
+
+// ---------- navigation failures (DNS / connection refused) ----------
+//
+// When the user's local DNS can't resolve a domain or the host actively
+// refuses the connection, Chrome navigates to chrome-error://chromewebdata/
+// and shows its native error page. WITHOUT this listener, the user would
+// keep retrying and the extension would keep intercepting/holding/allowing
+// in a loop because verdict-api thinks the domain is fine (different DNS
+// vantage point) and we never know the navigation failed.
+//
+// Fix: when the navigation we just verdict'd FAILED with a DNS / connection
+// error, swap the tab to a friendly "domain doesn't exist or has DNS issues"
+// page that explains:
+//   - the URL the user tried
+//   - the specific error code (ERR_NAME_NOT_RESOLVED, etc.)
+//   - that the failure is on THEIR side (the URL itself isn't malicious)
+//
+// The dnsfail.html page is web-accessible and shows the URL + error in
+// a non-alarming way. User can hit "Try again" (which re-attempts directly
+// without the extension intercepting) or "Go back".
+const DNS_FAIL_ERRORS = new Set([
+  "net::ERR_NAME_NOT_RESOLVED",
+  "net::ERR_NAME_RESOLUTION_FAILED",
+  "net::ERR_DNS_TIMED_OUT",
+  "net::ERR_DNS_MALFORMED_RESPONSE",
+  "net::ERR_DNS_SERVER_REQUIRES_TCP",
+  "net::ERR_DNS_SERVER_FAILED",
+  "net::ERR_DNS_SORT_ERROR",
+]);
+const CONN_FAIL_ERRORS = new Set([
+  "net::ERR_CONNECTION_REFUSED",
+  "net::ERR_CONNECTION_RESET",
+  "net::ERR_CONNECTION_CLOSED",
+  "net::ERR_CONNECTION_TIMED_OUT",
+  "net::ERR_ADDRESS_UNREACHABLE",
+  "net::ERR_NETWORK_CHANGED",
+]);
+
+chrome.webNavigation.onErrorOccurred.addListener(async (details) => {
+  if (details.frameId !== 0) return;
+  const err = details.error || "";
+  if (!DNS_FAIL_ERRORS.has(err) && !CONN_FAIL_ERRORS.has(err)) return;
+  if (shouldSkipURL(details.url)) return;
+  // Skip when the FAILED URL is our own interstitial (avoid recursion).
+  if (details.url.startsWith(chrome.runtime.getURL(""))) return;
+  // Drop any session-cache entry for this URL — it was wrong (we told
+  // the user ALLOW but the page can't actually load).
+  try {
+    const key = "v:" + (await sha256(normalizeForToken(details.url)));
+    await chrome.storage.session.remove(key);
+  } catch {}
+  // Show the friendly explainer.
+  const p = new URLSearchParams();
+  p.set("u", details.url);
+  p.set("e", err);
+  const kind = DNS_FAIL_ERRORS.has(err) ? "dns" : "conn";
+  p.set("k", kind);
+  try {
+    await chrome.tabs.update(details.tabId, {
+      url: chrome.runtime.getURL("src/dnsfail.html") + "?" + p.toString(),
+    });
+  } catch (e) {
+    // If we can't redirect (tab closed, etc.), drop quietly.
   }
 });
 
@@ -250,24 +795,105 @@ chrome.webNavigation.onCreatedNavigationTarget.addListener(async (details) => {
 
 // ---------- messages from holding.html ----------
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (msg?.kind === "resolve") {
+// isHttpURL — extension-side gate for URLs we hand to tabs.update etc.
+// Used to reject attacker-supplied msg.target values pointing at
+// javascript:/file:/chrome:/data: schemes (audit FINDING #1 — CRITICAL).
+function isHttpURL(s) {
+  if (typeof s !== "string") return false;
+  return /^https?:\/\/[^\s]+$/i.test(s);
+}
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // SENDER VALIDATION (audit FINDING #2 — CRITICAL).
+  // Without this, any other extension installed in the browser can send
+  // { kind: "apply", tabId: victim, target: "file:///etc/passwd", ... }
+  // and we would dutifully redirect the victim's tab. Restricting to our
+  // own runtime id closes the cross-extension impersonation path.
+  //
+  // Content scripts have sender.id === chrome.runtime.id too (extension
+  // scripts share the runtime id), so copy-guard.js continues to work.
+  if (sender?.id && sender.id !== chrome.runtime.id) {
+    return;
+  }
+  // Ultra mode: user clicked "Allow for 24h" on the isolation page.
+  // Persist the host-level override and ack so the page can navigate.
+  if (msg?.kind === "allow_temp") {
+    if (!isHttpURL(msg.target)) {
+      sendResponse({ ok: false, error: "invalid target scheme" });
+      return false;
+    }
     (async () => {
-      const verdict = await fetchVerdict(msg.target, msg.opener);
-      const key = "v:" + (await sha256(msg.target));
-      // Don't cache ANALYZING (transient) or sensitive-class results.
-      if (verdict.verdict && verdict.verdict !== "ANALYZING" && !isSensitive(msg.target)) {
-        await setCached(key, verdict);
+      await setAllowTemp(msg.target);
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
+  if (msg?.kind === "resolve") {
+    // Reject non-http(s) targets — fetchVerdict POSTs the URL as-is to
+    // verdict-api; a chrome:// or file:// URL would be nonsense.
+    if (!isHttpURL(msg.target)) {
+      sendResponse({ verdict: { verdict: "ALLOW", reason: "non-http URL bypassed" } });
+      return false;
+    }
+    // ALWAYS-RESPOND CONTRACT: every code path inside this IIFE MUST end
+    // with a sendResponse call. Without this, an unhandled error (e.g.
+    // chrome.storage throws on quota, sha256 errors on a weird URL,
+    // fetchVerdict somehow rejects despite its try/catch) leaves the
+    // holding page hanging until its hard deadline fires. The outer
+    // try/catch is the safety net.
+    (async () => {
+      try {
+        const verdict = await fetchVerdict(msg.target, msg.opener);
+        try {
+          const key = "v:" + (await sha256(normalizeForToken(msg.target)));
+          if (verdict.verdict && verdict.verdict !== "ANALYZING" && !isSensitive(msg.target)) {
+            await setCached(key, verdict);
+          }
+        } catch (e) {
+          // Cache write failure is non-fatal — we still have a verdict.
+          console.warn("[xgg] resolve: cache write failed:", e?.message || e);
+        }
+        sendResponse({ verdict });
+      } catch (e) {
+        console.warn("[xgg] resolve: handler crashed:", e?.message || e);
+        // Fail-open with a clearly-labelled verdict so the holding page
+        // routes the user somewhere instead of hanging.
+        sendResponse({
+          verdict: {
+            verdict: "ALLOW",
+            reason: "verification_error",
+            error: String(e?.message || e).slice(0, 200),
+          },
+        });
       }
-      sendResponse({ verdict });
     })();
     return true; // async response
   }
   if (msg?.kind === "apply") {
+    // Strict URL gate (audit FINDING #1). The apply path eventually calls
+    // chrome.tabs.update(tabId, { url: msg.target }) — without this guard
+    // a malicious caller could redirect the victim tab to chrome://,
+    // file:// or data: URIs that Chrome will obediently navigate to.
+    if (!isHttpURL(msg.target)) {
+      sendResponse({ ok: false, error: "invalid target scheme" });
+      return false;
+    }
+    // Verify the tab the caller wants to apply to is hosting one of OUR
+    // interstitial pages — without this, a malicious caller could specify
+    // any tab id in the browser and we'd redirect it.
     (async () => {
-      const sender = await chrome.tabs.get(msg.tabId);
-      if (sender) await applyVerdict(msg.tabId, msg.target, msg.verdict, msg.opener);
-      sendResponse({ ok: true });
+      try {
+        const tab = await chrome.tabs.get(msg.tabId);
+        const ourPrefix = chrome.runtime.getURL("");
+        if (!tab?.url || !tab.url.startsWith(ourPrefix)) {
+          sendResponse({ ok: false, error: "target tab is not an interstitial" });
+          return;
+        }
+        await applyVerdict(msg.tabId, msg.target, msg.verdict, msg.opener);
+        sendResponse({ ok: true });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e?.message || e) });
+      }
     })();
     return true;
   }
@@ -292,13 +918,18 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 // network error so a downed verdict-api never blocks user copies.
 async function fetchCommandVerdict(pageURL, command, pageTitle) {
   const cfg = await settings();
+  const apiBase = validateAPIBase(cfg.apiBase);
+  if (!apiBase) {
+    return { verdict: "ALLOW", reason_codes: [], explanation: "" };
+  }
+  warnIfInsecure(apiBase);
   const ctrl = new AbortController();
   // Tight timeout — copy-button mediation can't wait. The endpoint
   // measures <1ms server-side; 500ms covers network round-trip even on
   // a degraded connection.
   const timer = setTimeout(() => ctrl.abort(), 500);
   try {
-    const r = await fetch(`${cfg.apiBase}/v1/command-check`, {
+    const r = await fetch(`${apiBase}/v1/command-check`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -338,19 +969,40 @@ async function incrementCopyCounter(msg) {
 // the user is on the popup. When the user returns focus to the original tab,
 // the URL has changed but we never re-verdicted. Hook onActivated; if the
 // active tab's URL differs from what we last cached, re-verdict.
+//
+// Persistence (FINDING #9): the MV3 service worker is unloaded after ~30 s
+// of inactivity, losing any in-memory Map. We persist the last-seen URL per
+// tab to chrome.storage.session (cleared on browser restart, survives SW
+// restarts) so tabnabbing detection continues across idle cycles.
 
-const lastSeenByTab = new Map(); // tabId → last URL we verdicted
+async function getLastSeen(tabId) {
+  const got = await chrome.storage.session.get("lst:" + tabId);
+  return got["lst:" + tabId] || null;
+}
+
+async function setLastSeen(tabId, url) {
+  await chrome.storage.session.set({ ["lst:" + tabId]: url });
+}
+
+async function removeLastSeen(tabId) {
+  await chrome.storage.session.remove("lst:" + tabId);
+}
 
 chrome.tabs.onActivated.addListener(async ({ tabId }) => {
   try {
     const tab = await chrome.tabs.get(tabId);
     if (!tab?.url || !/^https?:/.test(tab.url)) return;
     if (tab.url.startsWith(chrome.runtime.getURL(""))) return;
-    const prev = lastSeenByTab.get(tabId);
+    // Read once at handler entry; subsequent logic uses the in-memory value
+    // so we don't make redundant storage round-trips within this handler.
+    const prev = await getLastSeen(tabId);
     if (prev && prev !== tab.url) {
       // URL changed since last activation → could be tabnabbing.
       const cfg = await settings();
-      if (!cfg.enabled) return;
+      if (!cfg.enabled) {
+        await setLastSeen(tabId, tab.url);
+        return;
+      }
       const key = "v:" + (await sha256(tab.url));
       const cached = await getCached(key);
       if (cached && cached.verdict === "BLOCK") {
@@ -365,12 +1017,21 @@ chrome.tabs.onActivated.addListener(async ({ tabId }) => {
         url: holdingURL(tab.url, prev, "UNKNOWN"),
       });
     }
-    lastSeenByTab.set(tabId, tab.url);
+    await setLastSeen(tabId, tab.url);
   } catch { /* tab may have been closed */ }
 });
 
-chrome.tabs.onRemoved.addListener((tabId) => {
-  lastSeenByTab.delete(tabId);
+chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
+  // Persist the URL on every completed load so the last-seen entry stays
+  // current across SW restarts — the badge handler already fires here, but
+  // that path skips interstitial tabs and doesn't update lastSeen.
+  if (info.status !== "complete" || !tab.url || !/^https?:/.test(tab.url)) return;
+  if (tab.url.startsWith(chrome.runtime.getURL(""))) return;
+  await setLastSeen(tabId, tab.url);
+});
+
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+  await removeLastSeen(tabId);
 });
 
 // ---------- iframe verdict gating (§16.2) ----------

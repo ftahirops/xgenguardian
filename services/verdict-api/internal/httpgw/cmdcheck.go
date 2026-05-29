@@ -41,9 +41,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xgenguardian/services/verdict-api/internal/brandgraph"
 	"github.com/xgenguardian/services/verdict-api/internal/installreg"
 	"github.com/xgenguardian/services/verdict-api/internal/reasons"
-	"github.com/xgenguardian/services/verdict-api/internal/trustreg"
 )
 
 // Local mirror of sandbox-render/app/shellcmd.py patterns. Kept here so
@@ -174,7 +174,7 @@ func (s *Server) commandCheck(w http.ResponseWriter, r *http.Request) {
 	//   - Untrusted host + 1 soft signal -> WARN.
 	//   - Trusted host + 0-1 signals     -> ALLOW.
 	//   - Untrusted host + 0 signals     -> ALLOW (no IOCs found at all).
-	trusted := trustreg.IsTrusted(host)
+	trusted := brandgraph.IsAnyTrust(host)
 	switch {
 	case len(softCodes) >= 2 && !trusted:
 		codes := append([]string{string(reasons.SuspiciousInstallCommand)}, softCodes...)

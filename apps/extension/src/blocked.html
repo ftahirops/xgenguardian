@@ -3,6 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Prevents malicious pages from framing this interstitial to spoof block
+       UI or steal URL params — background script navigates here directly, so
+       framing is never needed (audit FINDING #13). -->
+  <meta http-equiv="Content-Security-Policy" content="frame-ancestors 'none';">
   <title>Blocked by XGenGuardian</title>
   <style>
     :root { color-scheme: dark; }
@@ -13,42 +17,108 @@
       color: #e8eaed;
       line-height: 1.55;
     }
-    .wrap { max-width: 880px; margin: 56px auto; padding: 0 24px; }
-    h1 { font-size: 30px; margin: 0 0 8px; }
-    h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0.6px; color: #9aa3b2; margin: 32px 0 10px; }
+    .wrap { max-width: 980px; margin: 40px auto; padding: 0 24px; }
+    h1 { font-size: 32px; margin: 0 0 8px; }
+    h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.8px; color: #9aa3b2; margin: 36px 0 12px; }
+    h3 { font-size: 14px; color: #e8eaed; margin: 0 0 6px; }
     .pill {
       display: inline-block; background: #3b1115; color: #ff6b6b;
-      font-weight: 700; padding: 4px 12px; border-radius: 999px;
-      font-size: 12px; letter-spacing: 0.5px; text-transform: uppercase;
+      font-weight: 700; padding: 5px 14px; border-radius: 999px;
+      font-size: 11px; letter-spacing: 0.8px; text-transform: uppercase;
     }
+    .pill-warn { background: #3b2a11; color: #ffc56b; }
+    .pill-isolate { background: #1a2b3b; color: #6bb0ff; }
     .grade {
-      display: inline-block; margin-left: 8px; padding: 4px 12px;
+      display: inline-block; margin-left: 8px; padding: 5px 14px;
       background: #1a0d0d; color: #ff8c8c; border-radius: 999px;
-      font-weight: 700; font-size: 12px; letter-spacing: 0.5px;
+      font-weight: 700; font-size: 11px; letter-spacing: 0.5px;
+    }
+    .conf-badge {
+      display: inline-block; margin-left: 8px; padding: 5px 12px;
+      background: #11141d; color: #9aa3b2; border-radius: 999px;
+      font-size: 11px; font-weight: 600;
     }
     .panel {
       margin-top: 16px; padding: 18px 20px;
       background: #11141d; border: 1px solid #2a3142; border-radius: 12px;
     }
-    .row { display: grid; grid-template-columns: 180px 1fr; gap: 12px; padding: 8px 0; }
+    .panel.critical { border-color: #553030; background: #160f10; }
+    .row { display: grid; grid-template-columns: 200px 1fr; gap: 12px; padding: 8px 0; }
     .row + .row { border-top: 1px solid #1a1f2c; }
     .label { color: #9aa3b2; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; padding-top: 2px; }
     .value { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; font-size: 13px; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+    .mono  { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
 
+    /* Side-by-side screenshot comparison */
+    .compare {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-top: 12px;
+    }
+    .compare .col {
+      background: #06080c; border: 1px solid #2a3142; border-radius: 10px;
+      overflow: hidden; display: flex; flex-direction: column;
+    }
+    .compare .col.bad { border-color: #553030; }
+    .compare .col.good { border-color: #2a4a30; }
+    .compare .col-head {
+      padding: 10px 14px;
+      background: #11141d; border-bottom: 1px solid #2a3142;
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px;
+      font-weight: 700;
+    }
+    .compare .col.bad .col-head  { color: #ff8c8c; }
+    .compare .col.good .col-head { color: #8cff9c; }
+    .compare img {
+      width: 100%; max-height: 300px; object-fit: contain;
+      display: block; background: #06080c;
+    }
+    .compare .col-meta {
+      padding: 8px 14px; font-size: 12px; color: #bcc3d0;
+      border-top: 1px solid #1a1f2c;
+    }
+    @media (max-width: 720px) {
+      .compare { grid-template-columns: 1fr; }
+    }
+
+    /* Verification checklist grid */
+    .checks { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    @media (max-width: 720px) {
+      .checks { grid-template-columns: 1fr; }
+    }
+    .check {
+      padding: 12px 14px; border-radius: 8px;
+      background: #11141d; border: 1px solid #2a3142;
+      display: grid; grid-template-columns: 28px 1fr; gap: 10px;
+      align-items: start;
+    }
+    .check.fail   { border-color: #553030; background: #160f10; }
+    .check.warn   { border-color: #553e10; background: #1a1408; }
+    .check.pass   { border-color: #2a4a30; background: #0c1812; }
+    .check.unknown{ border-color: #2a3142; background: #0e111a; }
+    .check-icon { font-size: 18px; font-weight: 700; }
+    .check.fail   .check-icon { color: #ff6b6b; }
+    .check.warn   .check-icon { color: #ffc56b; }
+    .check.pass   .check-icon { color: #6cdc8a; }
+    .check.unknown.check-icon { color: #6f7787; }
+    .check-title { font-weight: 600; font-size: 13px; color: #e8eaed; }
+    .check-body  { color: #9aa3b2; font-size: 12px; margin-top: 2px; }
+
+    /* Signal cards */
     .signal {
-      margin-top: 10px; padding: 12px 14px;
+      margin-top: 10px; padding: 14px 16px;
       background: #11141d; border-left: 3px solid #ff6b6b; border-radius: 6px;
     }
     .signal.sev-medium  { border-left-color: #faad14; }
     .signal.sev-low     { border-left-color: #5e8bff; }
+    .signal.sev-high    { border-left-color: #ff6b6b; }
     .signal.sev-critical { border-left-color: #ff4d4f; background: #1a0d0d; }
     .signal-code { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: #6f7787; text-transform: uppercase; letter-spacing: 0.3px; }
     .signal-title { font-weight: 600; margin-top: 4px; font-size: 15px; }
     .signal-body  { color: #bcc3d0; font-size: 13px; margin-top: 4px; }
-    .signal-weight { float: right; font-size: 11px; color: #9aa3b2; }
 
-    .redirect-step { padding: 4px 0; }
+    .redirect-step { padding: 4px 0; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
     .redirect-arrow { color: #5e8bff; margin: 0 6px; }
 
     .ext-tag {
@@ -56,37 +126,68 @@
       background: #2a1a1a; color: #ff8c8c; border-radius: 4px;
       font-family: ui-monospace, Menlo, monospace; font-size: 11px;
     }
+    .provider-tag {
+      display: inline-block; padding: 3px 10px; margin: 3px 4px 3px 0;
+      background: #1a0d0d; color: #ff8c8c; border-radius: 4px;
+      font-size: 12px; font-weight: 600;
+    }
+    .age-badge {
+      display: inline-block; padding: 3px 10px; border-radius: 4px;
+      font-size: 12px; font-weight: 600;
+    }
+    .age-badge.fresh { background: #3b1115; color: #ff6b6b; }
+    .age-badge.young { background: #3b2a11; color: #ffc56b; }
+    .age-badge.aged  { background: #0c1812; color: #6cdc8a; }
 
-    .actions { margin-top: 28px; display: flex; gap: 12px; flex-wrap: wrap; }
+    .actions { margin-top: 32px; display: flex; gap: 12px; flex-wrap: wrap; }
     .btn { padding: 10px 18px; border-radius: 8px; text-decoration: none; font-weight: 600; cursor: pointer; border: 0; }
     .primary { background: #5e8bff; color: white; }
     .ghost   { background: transparent; border: 1px solid #2a3142; color: #cfd4dd; }
     .danger  { background: transparent; border: 1px solid #553030; color: #ff8c8c; }
 
-    .screenshot {
-      width: 100%; max-height: 360px; object-fit: contain;
-      margin-top: 12px; border: 1px solid #2a3142; border-radius: 8px;
-      background: #06080c;
-    }
-
     .loading { color: #6f7787; font-size: 13px; padding: 16px 0; }
     .empty   { color: #6f7787; font-size: 13px; padding: 8px 0; font-style: italic; }
+
+    .footer-meta { margin-top: 40px; color: #6f7787; font-size: 12px; }
+    .footer-meta code { color: #9aa3b2; }
   </style>
 </head>
 <body>
   <main class="wrap">
     <div>
-      <span class="pill">Blocked</span>
+      <span class="pill" id="verdictPill">Blocked</span>
       <span class="grade" id="grade" hidden></span>
+      <span class="conf-badge" id="confBadge" hidden></span>
     </div>
     <h1 id="title">This page was blocked.</h1>
-    <p style="color:#bcc3d0; margin-top: 4px;" id="reason">
+    <p style="color:#bcc3d0; margin-top: 4px; font-size: 15px;" id="reason">
       XGenGuardian detected high-confidence malicious indicators before your browser loaded it.
     </p>
 
-    <h2>Where it failed</h2>
+    <!-- VISUAL COMPARISON: phishing page vs real brand -->
+    <h2 id="compareHeader" hidden>Visual evidence</h2>
+    <div class="compare" id="compareGrid" hidden>
+      <div class="col bad">
+        <div class="col-head">This page (suspicious)</div>
+        <img id="badShot" alt="Suspicious page screenshot" />
+        <div class="col-meta" id="badMeta">Sandbox-captured</div>
+      </div>
+      <div class="col good">
+        <div class="col-head" id="goodHead">Real brand reference</div>
+        <img id="goodShot" alt="Real brand reference screenshot" />
+        <div class="col-meta" id="goodMeta">Curated brand reference</div>
+      </div>
+    </div>
+
+    <!-- WHY: per-signal evidence -->
+    <h2>Why this was blocked</h2>
     <div id="signals" class="loading">Fetching detailed evidence…</div>
 
+    <!-- VERIFICATION CHECKLIST: per-check pass/fail grid -->
+    <h2>Verification checklist</h2>
+    <div class="checks" id="checks"></div>
+
+    <!-- Page identity -->
     <h2>Page identity</h2>
     <div class="panel">
       <div class="row"><div class="label">Requested URL</div><div class="value" id="url"></div></div>
@@ -109,15 +210,16 @@
       </div>
     </div>
 
+    <!-- Hosting + identity -->
     <h2>Hosting + identity</h2>
     <div class="panel">
+      <div class="row" id="ageRow" hidden>
+        <div class="label">Domain age</div>
+        <div class="value"><span class="age-badge" id="ageBadge"></span> <span id="ageDetail" style="color:#9aa3b2;"></span></div>
+      </div>
       <div class="row" id="registrarRow" hidden>
         <div class="label">Registrar</div>
         <div class="value" id="registrar"></div>
-      </div>
-      <div class="row" id="ageRow" hidden>
-        <div class="label">Domain age</div>
-        <div class="value" id="age"></div>
       </div>
       <div class="row" id="asnRow" hidden>
         <div class="label">Hosting ASN</div>
@@ -131,6 +233,18 @@
         <div class="label">Cert SHA-256</div>
         <div class="value mono" id="certHash"></div>
       </div>
+      <div class="row" id="vendorDNSRow" hidden>
+        <div class="label">Security DNS providers</div>
+        <div class="value" id="vendorDNS"></div>
+      </div>
+      <div class="row" id="connIdRow" hidden>
+        <div class="label">Connection identity</div>
+        <div class="value" id="connId"></div>
+      </div>
+      <div class="row" id="trustRow" hidden>
+        <div class="label">Trust score</div>
+        <div class="value" id="trust"></div>
+      </div>
       <div class="row" id="extRow" hidden>
         <div class="label">External feeds</div>
         <div class="value" id="ext"></div>
@@ -142,17 +256,15 @@
       <ul id="forms" class="mono"></ul>
     </div>
 
-    <h2 id="screenshotHeader" hidden>Sandbox screenshot</h2>
-    <img id="screenshot" class="screenshot" hidden />
-
     <div class="actions">
-      <a class="primary" href="javascript:history.back()">Go back</a>
+      <button class="btn primary" id="goBackBtn" type="button">Go back</button>
       <a class="ghost"   id="viewFullEvidence" target="_blank" rel="noopener">Open full report →</a>
       <a class="danger"  id="reportFP"         target="_blank" rel="noopener">I think this is wrong</a>
     </div>
 
-    <p style="margin-top:40px; color:#6f7787; font-size:12px;">
-      XGenGuardian &middot; evidence ID: <span class="mono" id="evidenceIdFooter"></span>
+    <p class="footer-meta">
+      XGenGuardian &middot; evidence ID: <code id="evidenceIdFooter"></code> &middot;
+      scanned: <span id="scannedAt">just now</span>
     </p>
   </main>
 

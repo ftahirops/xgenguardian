@@ -3,6 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Prevents malicious pages from framing this interstitial to spoof block
+       UI or steal URL params — background script navigates here directly, so
+       framing is never needed (audit FINDING #13). -->
+  <meta http-equiv="Content-Security-Policy" content="frame-ancestors 'none';">
   <title>Checking site safety — XGenGuardian</title>
   <style>
     :root { color-scheme: dark; }
@@ -60,12 +64,22 @@
     <div class="target" id="target"></div>
     <div class="opener" id="opener" hidden></div>
 
+    <div class="elapsed-indicator" style="margin-top:4px; color:#6f7787; font-size:11px; font-family: ui-monospace, Menlo, monospace;">
+      <span id="elapsed">0.0s</span>
+    </div>
+
     <div class="timeout" id="timeout">
-      Still checking after <span id="elapsed">2.0s</span>.
-      The site may be slow or unknown. Open in isolation to be safe.
-      <div class="actions shown">
-        <button class="btn primary" id="isolateBtn">Open in isolation</button>
-        <button class="btn ghost"   id="backBtn">Go back</button>
+      <p style="margin: 0 0 12px; color:#ffb3b3; font-weight:600;">Couldn't verify in time.</p>
+      <p style="margin: 0 0 16px; color:#cfd4dd; font-size:13px;">
+        The verdict service didn't respond. The site may be slow, your
+        XGenGuardian backend may be unreachable, or the URL may be malformed.
+        Choose how to proceed:
+      </p>
+      <div class="actions shown" style="flex-direction:column; gap:8px; align-items:stretch;">
+        <button class="btn primary" id="allowOnceBtn">Allow this page once</button>
+        <button class="btn primary" id="allowRememberBtn" style="background:#3b2a11; color:#ffc56b; border:1px solid #553e10;">Allow & remember this site for 24h</button>
+        <button class="btn ghost" id="isolateBtn">Open in isolation (safest)</button>
+        <button class="btn ghost" id="backBtn">Go back</button>
       </div>
     </div>
   </main>

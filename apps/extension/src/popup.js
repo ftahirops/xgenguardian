@@ -43,11 +43,15 @@ function badgeClass(v) {
       `https://report.xgenguardian.com/?url=${encodeURIComponent(tab.url)}`;
   }
 
-  const cfg = await chrome.storage.sync.get({ enabled: true });
+  // Read/write to storage.local to stay consistent with options.js and
+  // background.js — see FINDING #7 / #15 in the audit. Using storage.sync
+  // here meant the popup's "enabled" toggle and the Options page's "enabled"
+  // toggle lived in different stores and silently disagreed.
+  const cfg = await chrome.storage.local.get({ enabled: true });
   const cb = document.getElementById("enabled");
   cb.checked = cfg.enabled;
   cb.addEventListener("change", async () => {
-    await chrome.storage.sync.set({ enabled: cb.checked });
+    await chrome.storage.local.set({ enabled: cb.checked });
   });
 
   document.getElementById("options").addEventListener("click", (e) => {

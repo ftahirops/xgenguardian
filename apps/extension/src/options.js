@@ -28,6 +28,9 @@ const defaults = {
     malvertising: true,
     unknown_sensitive_isolate: false,
   },
+  // userAllowlist — newline-separated hostnames / suffixes / IPs / CIDRs
+  // the user permanently trusts. Bypasses ALL scanning when matched.
+  userAllowlist: "",
 };
 
 // --- mode definitions ---
@@ -76,6 +79,15 @@ const MODES = [
     blocks: ["everything in Strict", "unknown sensitive → ISOLATE"],
     cats: { adult: true, popunder: true, gambling: true, piracy: true, crack_keygen: true, malvertising: true, unknown_sensitive_isolate: true },
     dns: { name: "NextDNS or AdGuard DNS", v4: ["94.140.14.14", "94.140.15.15"], note: "AdGuard Family / NextDNS profile with full filtering. Configurable per-device for max coverage." },
+  },
+  {
+    id: "ultra",
+    name: "Ultra",
+    badge: "zero-trust",
+    desc: "Default-block / clearance-gate. Every URL must pass ALL verification checks (feed, vendor DNS, domain age, hostname shape, visual, identity, behavior) to open normally. Anything uncertain opens in ISOLATE. For executives, journalists, IR analysts, and personal high-security browsing where one-shot phishing is unacceptable. You can override per-site for 24h on the isolation page.",
+    blocks: ["everything in Paranoid", "any URL that doesn't earn full clearance → ISOLATE"],
+    cats: { adult: true, popunder: true, gambling: true, piracy: true, crack_keygen: true, malvertising: true, unknown_sensitive_isolate: true },
+    dns: { name: "NextDNS / AdGuard Family (strictest profile)", v4: ["94.140.14.14", "94.140.15.15"], note: "Use the strictest DNS-layer filter you have access to. XGenGuardian Ultra adds clearance-gate on top." },
   },
 ];
 
@@ -183,6 +195,17 @@ function selectMode(id, applyDefaults) {
   renderDNSRec(id);
 }
 
+// updateHTTPWarning — show the plaintext-HTTP banner when either API base
+// is on http://. Live-updates as the user types so they see the warning
+// disappear when they switch to https://. (audit FINDING #3 mitigation.)
+function updateHTTPWarning() {
+  const a = (document.getElementById("apiBase").value || "").trim();
+  const b = (document.getElementById("portalApiBase").value || "").trim();
+  const insecure = /^http:\/\//i.test(a) || /^http:\/\//i.test(b);
+  const banner = document.getElementById("httpWarn");
+  if (banner) banner.hidden = !insecure;
+}
+
 async function load() {
   const stored = await new Promise((res) => chrome.storage.local.get(defaults, res));
   state = {
@@ -195,15 +218,48 @@ async function load() {
   document.getElementById("enabled").checked = state.enabled;
   document.getElementById("enforceWarn").checked = state.enforceWarn;
   document.getElementById("telemetry").checked = state.telemetry;
+  document.getElementById("userAllowlist").value = state.userAllowlist || "";
   selectMode(state.mode || "safe", false);
+  updateHTTPWarning();
+  document.getElementById("apiBase").addEventListener("input", updateHTTPWarning);
+  document.getElementById("portalApiBase").addEventListener("input", updateHTTPWarning);
+}
+
+// validateAPIBase — same gate as background.js. Returns null on anything
+// that isn't http(s)://, so Save can refuse to persist a poisoned value.
+function validateAPIBase(s) {
+  if (typeof s !== "string") return null;
+  const u = s.trim();
+  if (!/^https?:\/\/[^\s]+$/i.test(u)) return null;
+  return u.replace(/\/+$/, "");
 }
 
 async function save() {
-  state.apiBase = document.getElementById("apiBase").value || defaults.apiBase;
-  state.portalApiBase = document.getElementById("portalApiBase").value || defaults.portalApiBase;
+  const rawApi    = document.getElementById("apiBase").value || defaults.apiBase;
+  const rawPortal = document.getElementById("portalApiBase").value || defaults.portalApiBase;
+  const api    = validateAPIBase(rawApi);
+  const portal = validateAPIBase(rawPortal);
+  if (!api || !portal) {
+    const el = document.getElementById("saved");
+    el.textContent = "Invalid URL — must start with http:// or https://";
+    el.classList.add("show");
+    setTimeout(() => {
+      el.classList.remove("show");
+      el.textContent = "Saved.";
+    }, 2000);
+    return;
+  }
+  state.apiBase = api;
+  state.portalApiBase = portal;
   state.enabled = document.getElementById("enabled").checked;
   state.enforceWarn = document.getElementById("enforceWarn").checked;
   state.telemetry = document.getElementById("telemetry").checked;
+  // Allowlist: normalize line endings, strip whitespace, drop empty/comment lines.
+  state.userAllowlist = (document.getElementById("userAllowlist").value || "")
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter((s) => s && !s.startsWith("#"))
+    .join("\n");
   await new Promise((res) => chrome.storage.local.set(state, res));
   const el = document.getElementById("saved");
   el.classList.add("show");
@@ -211,4 +267,83 @@ async function save() {
 }
 
 document.getElementById("save").addEventListener("click", save);
+
+// --- 24h ALLOW_TEMP management (Phase 7 stabilization) ---
+//
+// Lists every "at:<hostname>" key from chrome.storage.local with countdown
+// and a revoke button. Auto-refreshes every 60s; refreshes immediately
+// after a revoke. Storage layout:
+//
+//   chrome.storage.local["at:<hostname>"] = <timestamp ms>
+//   TTL = 24h from timestamp (matches background.js ALLOW_TEMP_TTL_MS)
+const ALLOW_TEMP_TTL_MS = 24 * 60 * 60 * 1000;
+
+function formatRemaining(ms) {
+  if (ms <= 0) return "expired";
+  const h = Math.floor(ms / (60 * 60 * 1000));
+  const m = Math.floor((ms % (60 * 60 * 1000)) / (60 * 1000));
+  if (h >= 1) return h + "h " + m + "m left";
+  if (m >= 1) return m + "m left";
+  return "<1m left";
+}
+
+async function renderAllowTemp() {
+  const root = document.getElementById("allowTempList");
+  if (!root) return;
+  const all = await new Promise((res) => chrome.storage.local.get(null, res));
+  const entries = [];
+  for (const k of Object.keys(all)) {
+    if (!k.startsWith("at:")) continue;
+    const host = k.slice(3);
+    const ts = all[k];
+    if (typeof ts !== "number") continue;
+    const expiresAt = ts + ALLOW_TEMP_TTL_MS;
+    const remaining = expiresAt - Date.now();
+    entries.push({ key: k, host, expiresAt, remaining });
+  }
+  entries.sort((a, b) => a.expiresAt - b.expiresAt);
+
+  // Clear children
+  while (root.firstChild) root.removeChild(root.firstChild);
+
+  if (entries.length === 0) {
+    const p = document.createElement("div");
+    p.style.cssText = "color:#6f7787; font-size:13px; font-style:italic;";
+    p.textContent = "No active overrides. Use the &laquo;Allow for 24h&raquo; button on isolation pages to add one.";
+    root.appendChild(p);
+    return;
+  }
+
+  for (const e of entries) {
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex; align-items:center; justify-content:space-between; padding: 10px 14px; margin-bottom: 8px; background:#11141d; border:1px solid #2a3142; border-radius:8px;";
+
+    const left = document.createElement("div");
+    const hostEl = document.createElement("div");
+    hostEl.style.cssText = "font-family: ui-monospace, Menlo, monospace; font-size:14px;";
+    hostEl.textContent = e.host;
+    const timeEl = document.createElement("div");
+    timeEl.style.cssText = "color:#9aa3b2; font-size:12px; margin-top:2px;";
+    timeEl.textContent = formatRemaining(e.remaining);
+    if (e.remaining <= 0) timeEl.style.color = "#ff8c8c";
+    left.appendChild(hostEl);
+    left.appendChild(timeEl);
+
+    const btn = document.createElement("button");
+    btn.textContent = "Revoke";
+    btn.style.cssText = "background:transparent; color:#ff8c8c; border:1px solid #553030; padding:6px 14px; border-radius:6px; cursor:pointer; font-weight:600; font-size:13px;";
+    btn.addEventListener("click", async () => {
+      await new Promise((res) => chrome.storage.local.remove(e.key, res));
+      renderAllowTemp();
+    });
+
+    row.appendChild(left);
+    row.appendChild(btn);
+    root.appendChild(row);
+  }
+}
+
+renderAllowTemp();
+setInterval(renderAllowTemp, 60 * 1000);
+
 load();

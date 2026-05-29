@@ -33,6 +33,7 @@
     .mode-name { font-size: 16px; font-weight: 600; }
     .mode-badge { font-size: 11px; padding: 2px 8px; border-radius: 4px; background: #2a3142; color: #9aa3b2; text-transform: uppercase; letter-spacing: 0.4px; }
     .mode-badge.recommended { background: #1b3a1f; color: #6dd47d; }
+    .mode-badge.zero-trust { background: #3b1115; color: #ff6b6b; }
     .mode-desc { color: #bcc3d0; font-size: 13px; margin-top: 6px; }
     .mode-blocks { color: #9aa3b2; font-size: 12px; margin-top: 6px; }
 
@@ -77,14 +78,17 @@
     <div class="divider"></div>
 
     <h2>API Endpoints</h2>
+    <div id="httpWarn" hidden style="padding: 10px 14px; margin: 12px 0; border-radius: 6px; background: #3b2a11; color: #ffc56b; font-size: 13px;">
+      &#9888;&nbsp; You are using plaintext HTTP. A network-path attacker can return ALLOW for any URL, neutralizing protection. Switch to HTTPS once your verdict-api is fronted by TLS.
+    </div>
     <div class="field">
       <label for="apiBase">Verdict API</label>
-      <input type="url" id="apiBase" placeholder="http://135.181.79.11:18080" />
-      <small>Self-hosted? Override here. Default is the operator's VPS.</small>
+      <input type="url" id="apiBase" placeholder="https://verdict.example.com" />
+      <small>Self-hosted? Override here. Default is the operator's VPS. <strong>Use HTTPS in production.</strong></small>
     </div>
     <div class="field">
       <label for="portalApiBase">Evidence (portal-api)</label>
-      <input type="url" id="portalApiBase" placeholder="http://135.181.79.11:18081" />
+      <input type="url" id="portalApiBase" placeholder="https://api.example.com" />
       <small>Block page fetches deep evidence from this endpoint.</small>
     </div>
 
@@ -102,8 +106,35 @@
       <label for="telemetry">Share anonymous block telemetry to improve detection</label>
     </div>
 
+    <h2>Permanent allowlist</h2>
+    <p style="color:#9aa3b2; font-size:13px; margin-top:-4px;">
+      Hostnames, domains, or IP addresses you always want to bypass scanning.
+      One entry per line. Examples:
+    </p>
+    <ul style="color:#6f7787; font-size:12px; margin: 4px 0 8px 18px; padding: 0;">
+      <li><code>opencode.ai</code> — exact hostname</li>
+      <li><code>.mycorp.com</code> — any subdomain of mycorp.com</li>
+      <li><code>135.181.79.27</code> — specific IP (port-agnostic)</li>
+      <li><code>10.0.0.0/8</code> — entire CIDR block</li>
+    </ul>
+    <textarea id="userAllowlist" rows="6" placeholder="opencode.ai&#10;.mycorp.com&#10;135.181.79.27"
+      style="width: 100%; box-sizing: border-box; padding: 10px 12px; background: #11141d; color: #e8eaed; border: 1px solid #2a3142; border-radius: 8px; font-family: ui-monospace, Menlo, monospace; font-size: 13px;"></textarea>
+    <small style="color:#6f7787; display:block; margin-top: 4px;">
+      These entries are stored locally in your browser. They take effect after Save.
+    </small>
+
     <button id="save">Save</button>
     <span class="saved" id="saved">Saved.</span>
+
+    <h2>Active 24h overrides</h2>
+    <p style="color:#9aa3b2; font-size:13px; margin-top: -4px;">
+      Hosts you trusted by clicking &laquo;Allow for 24h&raquo; on an isolation page.
+      Each entry expires automatically. Click &laquo;Revoke&raquo; to re-enable
+      verification immediately.
+    </p>
+    <div id="allowTempList" style="margin-top: 12px;">
+      <div style="color:#6f7787; font-size:13px; font-style:italic;">Loading…</div>
+    </div>
   </main>
 
   <script src="options.js"></script>

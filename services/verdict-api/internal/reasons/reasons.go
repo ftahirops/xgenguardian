@@ -31,6 +31,12 @@ const (
 	MaliciousDownloadTrigger          Code = "MALICIOUS_DOWNLOAD_TRIGGER"
 	RiskyDownloadLinked               Code = "RISKY_DOWNLOAD_LINKED"
 	RawIPHost                         Code = "RAW_IP_HOST"
+	RandomHostname                    Code = "RANDOM_HOSTNAME"
+	FreshDomain                       Code = "FRESH_DOMAIN"
+	VendorDNSConsensusBlock           Code = "VENDOR_DNS_CONSENSUS_BLOCK"
+	VendorDNSSingleHit                Code = "VENDOR_DNS_SINGLE_HIT"
+	UltraNotCleared                   Code = "ULTRA_NOT_CLEARED"
+	UltraCleared                      Code = "ULTRA_CLEARED"
 	MalwareRawIPBinaryDrop            Code = "MALWARE_RAW_IP_BINARY_DROP"
 	// Shell-command IOCs found in docs-style pages (Straiker "Fake Claude
 	// Code" 2026-05-27 attack class). The page itself is the weapon — text
@@ -88,6 +94,15 @@ const (
 	AllowedByTenantOverride           Code = "ALLOWED_BY_TENANT_OVERRIDE"
 	IsolatedSensitivePageClass        Code = "ISOLATED_SENSITIVE_PAGE_CLASS"
 
+	// Phase 6: deep DOM evidence from sandbox-render's DOM inventory.
+	HiddenMaliciousLink               Code = "HIDDEN_MALICIOUS_LINK"
+	SuspiciousDownloadOffered         Code = "SUSPICIOUS_DOWNLOAD_OFFERED"
+	ObfuscatedJSDetected              Code = "OBFUSCATED_JS_DETECTED"
+	HiddenIframeCrossOrigin           Code = "HIDDEN_IFRAME_CROSS_ORIGIN"
+	OverlayClickjack                  Code = "OVERLAY_CLICKJACK"
+	LinkedPageBlocked                 Code = "LINKED_PAGE_BLOCKED"
+	LinkedPageIsolated                Code = "LINKED_PAGE_ISOLATED"
+
 	// Reserved for future detectors (templates registered so portal does not 404).
 	YaraSignatureMatch                Code = "YARA_SIGNATURE_MATCH"
 	SubdomainTakeoverRisk             Code = "SUBDOMAIN_TAKEOVER_RISK"
@@ -96,6 +111,18 @@ const (
 	HTMLSmugglingPattern              Code = "HTML_SMUGGLING_PATTERN"
 	DGAClassifierHit                  Code = "DGA_CLASSIFIER_HIT"
 	MinerPoolContact                  Code = "MINER_POOL_CONTACT"
+
+	// Phase B: connection identity codes. Emitted by internal/connid when
+	// the browser's actual remote IP is compared against the XGG resolver
+	// ledger, CDN/ASN expectations, and TLS identity.
+	UserDNSPathMatch              Code = "USER_DNS_PATH_MATCH"
+	UserDNSPathMismatch           Code = "USER_DNS_PATH_MISMATCH"
+	CDNASNMatch                   Code = "CDN_ASN_MATCH"
+	CDNASNMismatch                Code = "CDN_ASN_MISMATCH"
+	PublicDomainPrivateIP         Code = "PUBLIC_DOMAIN_PRIVATE_IP"
+	TLSIdentityMismatch           Code = "TLS_IDENTITY_MISMATCH"
+	ExpectedResolverBypassed      Code = "EXPECTED_RESOLVER_BYPASSED"
+	LocalResolverHijackSuspected  Code = "LOCAL_RESOLVER_HIJACK_SUSPECTED"
 )
 
 // Template is the human-readable form rendered in interstitials and the portal.
@@ -195,6 +222,36 @@ var templates = map[Code]Template{
 		Title: "URL points at a raw IP address",
 		Body:  "Legitimate websites use domain names, not raw IPs. This URL hits an IP directly.",
 		Severity: SeverityMedium,
+	},
+	RandomHostname: {
+		Title: "Hostname looks randomly generated",
+		Body:  "The hostname has low vowel ratio, long consonant runs, and/or no repeating bigrams — patterns typical of phishing kits and short-lived attack infrastructure.",
+		Severity: SeverityMedium,
+	},
+	FreshDomain: {
+		Title: "Domain was registered recently",
+		Body:  "This domain was registered in the last few weeks. Real phishing campaigns burn through fresh, just-registered domains; legitimate sites with sensitive flows almost always have established registration history.",
+		Severity: SeverityHigh,
+	},
+	VendorDNSConsensusBlock: {
+		Title: "Multiple security DNS providers block this domain",
+		Body:  "Independent protective-DNS providers (Cloudflare, Quad9, AdGuard, OpenDNS, CleanBrowsing) maintain separate threat lists. When two or more agree to block a domain, it is near-certainly malicious — multiple security teams have independently confirmed the threat.",
+		Severity: SeverityCritical,
+	},
+	VendorDNSSingleHit: {
+		Title: "One security DNS provider blocks this domain",
+		Body:  "A single protective-DNS provider has this domain on their blocklist. Treating as advisory until corroborated by another signal.",
+		Severity: SeverityMedium,
+	},
+	UltraNotCleared: {
+		Title: "Ultra mode: page not fully cleared",
+		Body:  "Ultra mode requires every verification gate to affirmatively pass before allowing a page. This page failed or could not verify one or more gates — opening in isolation as a precaution. See the verification checklist above to see which gates didn't pass.",
+		Severity: SeverityMedium,
+	},
+	UltraCleared: {
+		Title: "Ultra mode: page passed full clearance",
+		Body:  "Every verification gate affirmatively passed. Page allowed normally.",
+		Severity: SeverityLow,
 	},
 	MalwareRawIPBinaryDrop: {
 		Title: "Suspected botnet binary drop",
@@ -397,6 +454,84 @@ var templates = map[Code]Template{
 		Title:    "Could not verify a sensitive page",
 		Body:     "This is a login, payment, or OAuth page and the verification service is unavailable. Opening it in isolation as a safety default.",
 		Severity: SeverityLow,
+	},
+
+	// Phase 6: deep DOM evidence
+	HiddenMaliciousLink: {
+		Title:    "Hidden anchors linking off-page",
+		Body:     "This page contains hidden anchors (display:none, off-screen, or 1px overlay) pointing to external destinations — a common cloaking technique used to hide malicious redirects.",
+		Severity: SeverityMedium,
+	},
+	SuspiciousDownloadOffered: {
+		Title:    "Suspicious download offered",
+		Body:     "This page links to an executable, installer, or archive download. On a sensitive page (login/payment/OAuth) this is a high-risk pattern.",
+		Severity: SeverityHigh,
+	},
+	ObfuscatedJSDetected: {
+		Title:    "Obfuscated JavaScript detected",
+		Body:     "This page contains JavaScript with multiple obfuscation indicators (eval, atob chains, high-entropy strings). Obfuscated code is used to hide malicious behaviour from security scanners.",
+		Severity: SeverityMedium,
+	},
+	HiddenIframeCrossOrigin: {
+		Title:    "Hidden cross-origin iframe",
+		Body:     "This page embeds a hidden iframe from a different origin. Hidden cross-origin iframes are used to silently load malicious content, exfiltrate data, or stage credential theft.",
+		Severity: SeverityMedium,
+	},
+	OverlayClickjack: {
+		Title:    "Clickjacking overlay detected",
+		Body:     "This page has a full-viewport transparent overlay that captures clicks — a classic clickjacking pattern used to trick users into interacting with hidden elements.",
+		Severity: SeverityHigh,
+	},
+	LinkedPageBlocked: {
+		Title:    "Linked page is blocked",
+		Body:     "A page linked from this URL returned a BLOCK verdict during deep-scan.",
+		Severity: SeverityHigh,
+	},
+	LinkedPageIsolated: {
+		Title:    "Linked page is isolated",
+		Body:     "A page linked from this URL returned an ISOLATE verdict during deep-scan.",
+		Severity: SeverityMedium,
+	},
+
+	UserDNSPathMatch: {
+		Title:    "Browser DNS path matches XGenGuardian resolver",
+		Body:     "The IP your browser connected to was one of the IPs the XGenGuardian resolver recently returned for this domain. The DNS path is consistent.",
+		Severity: SeverityLow,
+	},
+	UserDNSPathMismatch: {
+		Title:    "Browser DNS path diverges from XGenGuardian resolver",
+		Body:     "Your browser reached an IP the XGenGuardian resolver did not recently return for this domain. This can happen with VPN DNS, browser DoH, captive portals, or local DNS hijack.",
+		Severity: SeverityMedium,
+	},
+	CDNASNMatch: {
+		Title:    "Browser remote ASN matches expected CDN",
+		Body:     "The autonomous system serving this connection matches the known CDN/infrastructure set for this domain.",
+		Severity: SeverityLow,
+	},
+	CDNASNMismatch: {
+		Title:    "Browser remote ASN does not match expected infrastructure",
+		Body:     "The autonomous system serving this connection is not among the expected ASNs for this domain. May indicate DNS hijack, MITM, or a malicious resolver.",
+		Severity: SeverityHigh,
+	},
+	PublicDomainPrivateIP: {
+		Title:    "Public domain resolved to a private IP",
+		Body:     "This is a public domain but the browser connected to a private/loopback/link-local IP. This is a classic DNS rebinding / hosts-file hijack indicator and is treated as a hard block.",
+		Severity: SeverityCritical,
+	},
+	TLSIdentityMismatch: {
+		Title:    "TLS certificate identity does not match host",
+		Body:     "The TLS certificate served on this connection is not valid for the requested host. The connection cannot be trusted for any sensitive action.",
+		Severity: SeverityCritical,
+	},
+	ExpectedResolverBypassed: {
+		Title:    "Expected resolver was bypassed",
+		Body:     "The browser appears to have bypassed the XGenGuardian resolver (for example via browser DoH or a system VPN), so DNS-time protections did not apply to this connection.",
+		Severity: SeverityMedium,
+	},
+	LocalResolverHijackSuspected: {
+		Title:    "Local resolver hijack suspected",
+		Body:     "The IP the browser reached, the XGenGuardian resolver answer, and the backend trusted resolvers disagree in a pattern consistent with local DNS hijack (router compromise, malicious ISP resolver, or hosts-file tampering).",
+		Severity: SeverityHigh,
 	},
 }
 

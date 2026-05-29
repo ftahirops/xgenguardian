@@ -5,7 +5,7 @@
 -- resolver writes via a Redis stream which a small worker drains into here,
 -- so the resolver's hot path remains free of synchronous DB writes.
 
-CREATE TABLE dns_queries (
+CREATE TABLE IF NOT EXISTS dns_queries (
   id           BIGSERIAL PRIMARY KEY,
   ts           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   domain       TEXT NOT NULL,
@@ -19,10 +19,10 @@ CREATE TABLE dns_queries (
   sinkhole     BOOLEAN NOT NULL DEFAULT FALSE
 );
 
-CREATE INDEX idx_dns_queries_ts        ON dns_queries (ts DESC);
-CREATE INDEX idx_dns_queries_domain    ON dns_queries (domain);
-CREATE INDEX idx_dns_queries_verdict   ON dns_queries (verdict);
-CREATE INDEX idx_dns_queries_sinkhole  ON dns_queries (sinkhole) WHERE sinkhole;
+CREATE INDEX IF NOT EXISTS idx_dns_queries_ts        ON dns_queries (ts DESC);
+CREATE INDEX IF NOT EXISTS idx_dns_queries_domain    ON dns_queries (domain);
+CREATE INDEX IF NOT EXISTS idx_dns_queries_verdict   ON dns_queries (verdict);
+CREATE INDEX IF NOT EXISTS idx_dns_queries_sinkhole  ON dns_queries (sinkhole) WHERE sinkhole;
 
 -- Retention: keep 30 days by default; the operator can extend with
 -- `ALTER TABLE dns_queries SET (autovacuum_enabled = true);` and a cron.

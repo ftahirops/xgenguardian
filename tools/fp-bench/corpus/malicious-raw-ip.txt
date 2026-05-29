@@ -1,0 +1,14 @@
+# Category: malicious-raw-ip
+# Last refreshed: 2026-05-29
+# Public raw-IP URLs are near-certainly malware, botnet drops, or phishing.
+# All entries should be classified BLOCK or ISOLATE.
+
+# Raw IP without distinguishing path — RAW_IP_HOST should fire
+http://1.1.1.1/
+
+# Raw IP + Mirai-style architecture path → MALWARE_RAW_IP_BINARY_DROP
+# (Examples — do not visit; test fixture only)
+# http://203.0.113.45/x86
+# http://203.0.113.45/arm5
+# http://203.0.113.45/mips
+# http://203.0.113.45/sh4

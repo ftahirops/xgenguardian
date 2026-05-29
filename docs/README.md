@@ -9,6 +9,7 @@ docs/
 ├── README.md               ← you are here
 ├── advanced-detection-cases.md ← hard phishing, scam, OAuth, raw-IP, and edge-case examples
 ├── blueprint-architecture.md ← GitHub-facing system blueprint and differentiation
+├── final-engine-architecture-plan.md ← final mature DNS/action/trust/risk engine target
 ├── maturity-testing-blueprint.md ← exhaustive testing, chaos, FP/FN, and release gates
 ├── architecture.md         ← full architecture, threat model, features, plan
 ├── phases/                 ← phase plans (1 file per phase)
@@ -44,6 +45,7 @@ docs/
 
 - [Advanced Detection Cases](advanced-detection-cases.md)
 - [Blueprint Architecture](blueprint-architecture.md)
+- [Final Engine Architecture Plan](final-engine-architecture-plan.md)
 - [Maturity Testing Blueprint](maturity-testing-blueprint.md)
 - [Real-User Acceptance Test Plan](real-user-acceptance-test-plan.md)
 - [Architecture (full document)](architecture.md)

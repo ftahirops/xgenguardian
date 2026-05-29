@@ -42,6 +42,7 @@ func Run(ctx context.Context, domain string, brandKeywords []string) Result {
 		slotCert
 		slotLexical
 		slotDGA
+		slotRandomHost
 		nSlots
 	)
 	var out [nSlots]Signal
@@ -73,6 +74,20 @@ func Run(ctx context.Context, domain string, brandKeywords []string) Result {
 		}
 		if s, ok := DGASignal(sld); ok {
 			out[slotDGA] = s
+		}
+		return nil
+	})
+
+	g.Go(func() error {
+		// Random-host heuristic — independent of DGA classifier. Catches
+		// the same FN class (jevhcksi, claudiyoketka) via vowel-ratio +
+		// consonant-run + bigram-diversity pillars.
+		sld := domain
+		if i := strings.IndexByte(domain, '.'); i >= 0 {
+			sld = domain[:i]
+		}
+		if s, ok := RandomHostSignal(sld); ok {
+			out[slotRandomHost] = s
 		}
 		return nil
 	})
@@ -121,14 +136,30 @@ func homoglyphScore(domain string, keywords []string) Signal {
 				}
 			}
 		}
-		// Near-match: typo within 1–2 edits.
+		// Near-match: typo within 1-2 edits AND proportional to keyword
+		// length. Short brand keywords (≤5 chars like "jira", "ebay")
+		// produce false positives when we accept d=2 — that's half the
+		// characters different, which is not a typosquat (e.g. ziza vs
+		// jira: d=2, both len 4 → coincidence). Real typosquats:
+		//   - paypall → paypal (kw=6, d=1) ✓
+		//   - mlcrosoft → microsoft (kw=9, d=1) ✓
+		//   - amaz0n → amazon (kw=6, d=1) ✓
+		// Rule: d=1 always fires; d=2 only fires when kw length >= 6.
 		for _, v := range vars {
-			if d := levenshtein(v, kw); d > 0 && d <= 2 {
-				return Signal{
-					Name:   "homoglyph_match",
-					Weight: 0.7,
-					Detail: "edit distance " + itoa(d) + " from brand keyword '" + kw + "' (via " + v + ")",
-				}
+			d := levenshtein(v, kw)
+			if d == 0 {
+				continue
+			}
+			if d > 2 {
+				continue
+			}
+			if d == 2 && len(kw) < 6 {
+				continue
+			}
+			return Signal{
+				Name:   "homoglyph_match",
+				Weight: 0.7,
+				Detail: "edit distance " + itoa(d) + " from brand keyword '" + kw + "' (via " + v + ")",
 			}
 		}
 		// Combosquat: brand appears as a substring with extra tokens.

@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Prevent malicious pages from framing this interstitial. -->
+  <meta http-equiv="Content-Security-Policy" content="frame-ancestors 'none';">
+  <title>Site unreachable — XGenGuardian</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      background: #0a0c11;
+      color: #e8eaed;
+      line-height: 1.55;
+    }
+    .wrap { max-width: 720px; margin: 64px auto; padding: 0 28px; }
+    .pill {
+      display: inline-block; background: #1a2b3b; color: #6bb0ff;
+      font-weight: 700; padding: 5px 14px; border-radius: 999px;
+      font-size: 11px; letter-spacing: 0.8px; text-transform: uppercase;
+    }
+    h1 { font-size: 28px; margin: 12px 0 8px; }
+    .summary { color: #bcc3d0; font-size: 15px; }
+    .panel {
+      margin-top: 24px; padding: 18px 22px;
+      background: #11141d; border: 1px solid #2a3142; border-radius: 12px;
+    }
+    .row { display: grid; grid-template-columns: 110px 1fr; gap: 12px; padding: 6px 0; }
+    .label { color: #9aa3b2; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; padding-top: 2px; }
+    .value { font-family: ui-monospace, Menlo, monospace; font-size: 13px; word-break: break-all; }
+    .reassure {
+      margin-top: 22px; padding: 14px 18px; border-radius: 10px;
+      background: #0c1812; border-left: 4px solid #6cdc8a;
+      color: #cfd4dd; font-size: 14px;
+    }
+    .reassure strong { color: #6cdc8a; }
+    .why { margin-top: 22px; color: #bcc3d0; font-size: 14px; }
+    .why ul { margin: 8px 0 0 18px; padding: 0; }
+    .why li { margin-bottom: 6px; }
+    .actions { margin-top: 26px; display: flex; gap: 12px; flex-wrap: wrap; }
+    .btn { padding: 10px 18px; border-radius: 8px; font-weight: 600; cursor: pointer; border: 0; font-size: 14px; }
+    .primary { background: #5e8bff; color: white; }
+    .ghost   { background: transparent; border: 1px solid #2a3142; color: #cfd4dd; }
+    .footer-meta { margin-top: 36px; color: #6f7787; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <span class="pill" id="pill">DNS failure</span>
+    <h1 id="title">This site couldn't be reached.</h1>
+    <p class="summary" id="summary">
+      The browser tried to look up this domain but didn't find it.
+    </p>
+
+    <div class="panel">
+      <div class="row"><div class="label">URL</div><div class="value" id="url"></div></div>
+      <div class="row"><div class="label">Error</div><div class="value" id="err"></div></div>
+    </div>
+
+    <div class="reassure">
+      <strong>This is NOT an XGenGuardian block.</strong>
+      The URL is not on any threat list — your computer's network just
+      couldn't resolve it. This usually means one of the things below.
+    </div>
+
+    <div class="why" id="whyDNS">
+      <h3 style="margin: 12px 0 6px; color:#e8eaed; font-size: 14px;">Common causes</h3>
+      <ul>
+        <li>The domain doesn't exist (typo in the URL, or the site has been taken down)</li>
+        <li>Your DNS provider (Pi-hole, NextDNS, AdGuard Home, ISP filter) is blocking it</li>
+        <li>Your Internet connection is offline</li>
+        <li>The site's authoritative DNS servers are down</li>
+      </ul>
+    </div>
+    <div class="why" id="whyConn" hidden>
+      <h3 style="margin: 12px 0 6px; color:#e8eaed; font-size: 14px;">Common causes</h3>
+      <ul>
+        <li>The server is offline or rebooting</li>
+        <li>A firewall (yours or the site's) is blocking the connection</li>
+        <li>The site is overloaded and not accepting new connections</li>
+        <li>Your network is offline</li>
+      </ul>
+    </div>
+
+    <div class="actions">
+      <button class="btn primary" id="retryBtn" type="button">Try again</button>
+      <button class="btn ghost"   id="backBtn"  type="button">Go back</button>
+    </div>
+
+    <p class="footer-meta">
+      XGenGuardian &middot; this page is shown when navigation fails before we can verdict it.
+      Re-enable normal browsing by closing this tab.
+    </p>
+  </main>
+  <script src="dnsfail.js"></script>
+</body>
+</html>

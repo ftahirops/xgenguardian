@@ -1,0 +1,14 @@
+[Unit]
+Description=XGenGuardian evidence retention cleanup — weekly Sunday 04:00 UTC
+Documentation=file:///home/xgenguardian/code/docs/runbooks/retention.md
+
+[Timer]
+# Fire every Sunday at 04:00 UTC
+OnCalendar=Sun *-*-* 04:00:00 UTC
+# Catch up if the system was off when the timer should have fired
+Persistent=true
+RandomizedDelaySec=300
+Unit=xgg-cleanup.service
+
+[Install]
+WantedBy=timers.target

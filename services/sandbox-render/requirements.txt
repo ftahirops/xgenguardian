@@ -1,0 +1,12 @@
+# XGenGuardian -- sandbox-render Python dependencies.
+# Pin major versions to avoid silent breakages from upstream changes.
+# Verified compatible: Python 3.11.
+fastapi>=0.111,<1
+uvicorn[standard]>=0.30,<1
+playwright>=1.46,<2
+playwright-stealth>=1.0.6,<2
+yara-python>=4.5.0,<5
+boto3>=1.34,<2
+pydantic>=2.7,<3
+httpx>=0.27,<1
+prometheus-client>=0.17,<1

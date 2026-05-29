@@ -3,6 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Prevents malicious pages from framing this interstitial to spoof block
+       UI or steal URL params — background script navigates here directly, so
+       framing is never needed (audit FINDING #13). -->
+  <meta http-equiv="Content-Security-Policy" content="frame-ancestors 'none';">
   <title>Opened in isolation — XGenGuardian</title>
   <style>
     :root { color-scheme: dark; }
@@ -35,6 +39,7 @@
     }
     .primary { background: #5e8bff; color: white; }
     .ghost   { background: transparent; border: 1px solid #2a3142; color: #cfd4dd; }
+    .warn    { background: #3b2a11; color: #ffc56b; border: 1px solid #553e10; }
     .frame {
       margin-top: 24px; width: 100%; height: 60vh;
       border: 1px solid #2a3142; border-radius: 8px;
@@ -70,9 +75,13 @@
     </div>
 
     <div class="actions">
-      <a class="primary" href="javascript:history.back()">Go back</a>
-      <button class="ghost" id="proceed">Proceed without isolation</button>
+      <button class="btn primary" id="goBackBtn" type="button">Go back</button>
+      <button class="btn warn"  id="allowTempBtn" type="button" title="Trust this site for 24 hours, then re-verify">I trust this — allow for 24h</button>
+      <button class="btn ghost" id="proceed" type="button">Proceed once (no save)</button>
     </div>
+    <p style="margin-top: 12px; color:#6f7787; font-size:12px;">
+      &laquo;Allow for 24h&raquo; saves the hostname to a local 24-hour allowlist (per browser). After 24 hours the URL is re-verified normally.
+    </p>
 
     <p style="margin-top:40px; color:#6f7787; font-size:12px;">
       XGenGuardian &middot; isolation status:

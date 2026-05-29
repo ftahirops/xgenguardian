@@ -4,65 +4,78 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
-  go-build:
+  # ──────────────────────────────────────────────────────────────────────────
+  # Go: build + vet + race-test for every service
+  # ──────────────────────────────────────────────────────────────────────────
+  go-build-test:
+    name: go / ${{ matrix.service }}
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        svc: [resolver, verdict-api, portal-api, ct-monitor]
+        service: [verdict-api, portal-api, resolver, ct-monitor]
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
-          cache-dependency-path: services/${{ matrix.svc }}/go.sum
-      - name: Build
-        working-directory: services/${{ matrix.svc }}
-        run: go build ./...
-      - name: Vet
-        working-directory: services/${{ matrix.svc }}
-        run: go vet ./...
-      - name: Test
-        working-directory: services/${{ matrix.svc }}
-        run: go test ./... -count=1
+          cache-dependency-path: services/${{ matrix.service }}/go.sum
 
-  python-services:
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-${{ matrix.service }}-${{ hashFiles(format('services/{0}/go.sum', matrix.service)) }}
+          restore-keys: |
+            go-${{ matrix.service }}-
+
+      - name: Build
+        working-directory: services/${{ matrix.service }}
+        run: go build ./...
+
+      - name: Vet
+        working-directory: services/${{ matrix.service }}
+        run: go vet ./...
+
+      - name: Test (race detector)
+        working-directory: services/${{ matrix.service }}
+        run: go test -race ./...
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Python: ruff lint for sandbox-render and visual-match
+  # (pytest deferred — integration tests need MinIO + Postgres)
+  # ──────────────────────────────────────────────────────────────────────────
+  python-lint-test:
+    name: python-lint / ${{ matrix.service }}
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        svc: [sandbox-render, visual-match]
+        service: [sandbox-render, visual-match]
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install
-        working-directory: services/${{ matrix.svc }}
-        run: |
-          pip install --upgrade pip
-          pip install fastapi uvicorn pydantic httpx
-      - name: Smoke import
-        working-directory: services/${{ matrix.svc }}
-        run: python -c "import app.main" || true
 
-  portal:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/portal
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: apps/portal/package-lock.json
-      - run: npm install --no-audit --no-fund
-      - run: npm run lint --if-present
-      - run: npm run build
+      - name: Install ruff
+        run: pip install --quiet ruff
 
-  migrations-sanity:
+      - name: Lint (ruff)
+        run: ruff check services/${{ matrix.service }}/app/
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Migrations round-trip: up -> down -all -> up, assert clean state
+  # ──────────────────────────────────────────────────────────────────────────
+  migrate-roundtrip:
+    name: migrate round-trip
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -79,9 +92,123 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@v4
-      - name: Apply migrations
+
+      - name: Install golang-migrate
         run: |
-          sudo apt-get update && sudo apt-get install -y postgresql-client
-          for f in $(ls migrations/*.sql | sort); do
-            PGPASSWORD=xgg psql -h localhost -U xgg -d xgg -f "$f"
-          done
+          curl -fsSL https://github.com/golang-migrate/migrate/releases/download/v4.17.1/migrate.linux-amd64.tar.gz \
+            | tar -xz migrate
+          sudo mv migrate /usr/local/bin/migrate
+          migrate --version
+
+      - name: Migrate UP
+        env:
+          DATABASE_URL: postgres://xgg:xgg@localhost:5432/xgg?sslmode=disable
+        run: migrate -path migrations -database "$DATABASE_URL" up
+
+      - name: Migrate DOWN -all
+        env:
+          DATABASE_URL: postgres://xgg:xgg@localhost:5432/xgg?sslmode=disable
+        run: migrate -path migrations -database "$DATABASE_URL" down -all
+
+      - name: Migrate UP again
+        env:
+          DATABASE_URL: postgres://xgg:xgg@localhost:5432/xgg?sslmode=disable
+        run: migrate -path migrations -database "$DATABASE_URL" up
+
+      - name: Assert schema_migrations state
+        env:
+          PGPASSWORD: xgg
+        run: |
+          COUNT=$(psql -h localhost -U xgg -d xgg -tAc \
+            "SELECT COUNT(*) FROM schema_migrations WHERE dirty = false;")
+          echo "Clean migration rows: $COUNT"
+          if [ "$COUNT" -lt 1 ]; then
+            echo "ERROR: schema_migrations is empty or all rows are dirty" >&2
+            exit 1
+          fi
+          DIRTY=$(psql -h localhost -U xgg -d xgg -tAc \
+            "SELECT COUNT(*) FROM schema_migrations WHERE dirty = true;")
+          if [ "$DIRTY" -gt 0 ]; then
+            echo "ERROR: $DIRTY dirty migration(s) found" >&2
+            exit 1
+          fi
+          echo "Migration state OK -- $COUNT version(s) applied, 0 dirty."
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Eval gate -- only when detection logic changes.
+  # Uses dorny/paths-filter to detect relevant file changes safely (no shell
+  # injection from commit metadata).
+  # ──────────────────────────────────────────────────────────────────────────
+  eval-gate:
+    name: eval gate (detection logic)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check detection-logic paths changed
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            detection:
+              - 'services/verdict-api/internal/policy/**'
+              - 'services/verdict-api/internal/tier1/**'
+              - 'tools/eval/**'
+
+      - uses: actions/setup-python@v5
+        if: steps.filter.outputs.detection == 'true' || github.event_name == 'workflow_dispatch'
+        with:
+          python-version: "3.11"
+
+      - name: Run eval harness
+        if: steps.filter.outputs.detection == 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          if [ -f tools/eval/run.py ]; then
+            pip install --quiet pyyaml 2>/dev/null || true
+            python tools/eval/run.py
+          else
+            echo ":white_check_mark: tools/eval/run.py not present -- skipping eval gate"
+          fi
+
+      - name: Skip (no detection-logic changes)
+        if: steps.filter.outputs.detection != 'true' && github.event_name != 'workflow_dispatch'
+        run: |
+          echo ":white_check_mark: No detection-logic paths changed -- eval gate skipped."
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Brand YAML schema validation -- only when brands.yaml changes
+  # ──────────────────────────────────────────────────────────────────────────
+  brand-yaml-validate:
+    name: brand-yaml schema check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check brands.yaml changed
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            brands:
+              - 'tools/brand-seeder/brands.yaml'
+
+      - uses: actions/setup-python@v5
+        if: steps.filter.outputs.brands == 'true' || github.event_name == 'workflow_dispatch'
+        with:
+          python-version: "3.11"
+
+      - name: Install check-jsonschema
+        if: steps.filter.outputs.brands == 'true' || github.event_name == 'workflow_dispatch'
+        run: pip install --quiet "check-jsonschema>=0.28"
+
+      - name: Validate brands.yaml against schema
+        if: steps.filter.outputs.brands == 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          check-jsonschema \
+            --schemafile tools/brand-seeder/brands.schema.json \
+            tools/brand-seeder/brands.yaml
+
+      - name: Skip (brands.yaml unchanged)
+        if: steps.filter.outputs.brands != 'true' && github.event_name != 'workflow_dispatch'
+        run: |
+          echo ":white_check_mark: brands.yaml unchanged -- validation skipped."

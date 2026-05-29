@@ -13,15 +13,20 @@ package httpgw
 
 import (
 	"os"
+	"net/url"
 	"strings"
 
+	"github.com/xgenguardian/services/verdict-api/internal/connid"
 	"github.com/xgenguardian/services/verdict-api/internal/fusion"
 	"github.com/xgenguardian/services/verdict-api/internal/installreg"
 	"github.com/xgenguardian/services/verdict-api/internal/oauthreg"
+	"github.com/xgenguardian/services/verdict-api/internal/orggraph"
 	"github.com/xgenguardian/services/verdict-api/internal/pageclass"
+	"github.com/xgenguardian/services/verdict-api/internal/brandgraph"
 	"github.com/xgenguardian/services/verdict-api/internal/policy"
 	"github.com/xgenguardian/services/verdict-api/internal/reasons"
-	"github.com/xgenguardian/services/verdict-api/internal/trustreg"
+	"github.com/xgenguardian/services/verdict-api/internal/trustscore"
+	"github.com/xgenguardian/services/verdict-api/internal/vendordns"
 )
 
 // useLegacyPolicy is true when USE_LEGACY_POLICY env is set. Operator panic
@@ -45,6 +50,7 @@ func buildPolicyInputs(
 	feedSources []string,
 	feedHit FeedHit, // tiered feed lookup result
 	oauthDec *oauthreg.Decision,
+	vendorDNS vendordns.ConsensusResult,
 ) policy.Inputs {
 	// Stage A: page class.
 	urlClass := pageclass.FromURL(req.URL)
@@ -186,6 +192,24 @@ func buildPolicyInputs(
 
 	// Stage F: context (feeds, OAuth, behavior, YARA, drift, challenge).
 	ctx := policy.ContextOutput{}
+	// Domain age (from RDAP). in.DomainAge is time.Duration; 0 means unknown
+	// (RDAP lookup failed, no registration date in response, or RDAP not
+	// configured). DomainAgeKnown lets the policy distinguish "we know it's
+	// 0 days old" (a brand-new domain) from "we never asked".
+	if in.DomainAge > 0 {
+		ctx.DomainAgeKnown = true
+		ctx.DomainAgeDays = int(in.DomainAge.Hours() / 24)
+	}
+	// VendorDNS — 8-provider protective-DNS consensus. ConsensusBlocks()
+	// returns true when ≥2 providers blocked (high-confidence). A single
+	// vendor hit is advisory only.
+	if vendorDNS.ConsensusBlocks() {
+		ctx.VendorDNSBlocked = true
+		ctx.VendorDNSBlockedBy = vendorDNS.BlockedBy
+	} else if vendorDNS.Hit() {
+		ctx.VendorDNSSingleHit = true
+		ctx.VendorDNSBlockedBy = vendorDNS.BlockedBy
+	}
 	if in.BlocklistHit {
 		ctx.FeedHit = true
 		ctx.FeedSources = feedSources
@@ -245,6 +269,32 @@ func buildPolicyInputs(
 		}
 	}
 
+	// Phase B: connection identity. Stash the browser_remote_ip the
+	// extension reported plus a private-IP flag so the policy can fire
+	// PUBLIC_DOMAIN_PRIVATE_IP. The full comparison logic (CDN ASN,
+	// resolver ledger, TLS) lands in Phase B.5; this is the minimum
+	// surface area needed for the first hard rule.
+	if req.BrowserRemoteIP != "" {
+		ctx.BrowserRemoteIP = req.BrowserRemoteIP
+		ctx.BrowserRemoteIPIsPrivate = connid.IsPrivateIP(req.BrowserRemoteIP)
+	}
+
+	// Tier-1 hostname-shape signals → SuspiciousHostnameSignals flag.
+	// Combine DGA + random_host so policy reacts to both consistently.
+	var hostHints []string
+	for _, s := range in.Tier1Signals {
+		switch s.Name {
+		case "dga_classifier_hit":
+			hostHints = append(hostHints, "DGA classifier")
+		case "random_host":
+			hostHints = append(hostHints, "random-host heuristic")
+		}
+	}
+	if len(hostHints) > 0 {
+		ctx.SuspiciousHostnameSignals = true
+		ctx.SuspiciousHostnameDetail = "Triggered: " + strings.Join(hostHints, " + ")
+	}
+
 	// Shell-command IOC findings from sandbox-render (Straiker attack class).
 	if render != nil {
 		ctx.ShellCmdHardFail = render.ShellCmd.HasHardFail
@@ -287,6 +337,138 @@ func buildPolicyInputs(
 		}
 	}
 
+	// Phase 6: populate deep DOM signals from sandbox-render's DOM inventory.
+	if render != nil {
+		// RiskyDownloadCount — links flagged by sandbox-render as risky downloads.
+		for _, l := range render.Links {
+			if l.IsRiskyDownload {
+				ctx.RiskyDownloadCount++
+			}
+		}
+
+		// HiddenSuspiciousCount — hidden anchors/iframes/forms whose href is
+		// either CROSS-ORIGIN or points at a risky-extension binary. Three
+		// orthogonal filters keep this from false-positing on legit sites:
+		//
+		//   1. Same-origin (.example.com → example.com) is NOT cross-origin.
+		//      Collapsed dropdown menus on a single domain are common.
+		//
+		//   2. Same-ORGANIZATION (Disney's moviesanywhere.com → disney.com)
+		//      is NOT cross-origin. The orggraph package maps multi-brand
+		//      organizations to a single org-id; SameOrgHosts returns true
+		//      across all of an org's domains. This is the structural fix
+		//      replacing per-brand suffix entries in trustreg.
+		//
+		//   3. Risky-extension hrefs (links to .exe / .msi / .dmg etc.) ARE
+		//      counted regardless of cross-origin status — even same-org
+		//      hidden download links warrant scrutiny.
+		pageHost := strings.ToLower(in.Domain)
+		for _, h := range render.HiddenElements {
+			if h.HrefOrSrc == "" {
+				continue
+			}
+			if h.Tag != "a" && h.Tag != "iframe" && h.Tag != "form" {
+				continue
+			}
+			isCrossOrigin := false
+			if u, err := url.Parse(h.HrefOrSrc); err == nil && u.Host != "" {
+				targetHost := strings.ToLower(u.Host)
+				// Strip :port for comparison.
+				if i := strings.IndexByte(targetHost, ':'); i >= 0 {
+					targetHost = targetHost[:i]
+				}
+				sameHost := strings.EqualFold(targetHost, pageHost) ||
+					strings.HasSuffix(targetHost, "."+pageHost)
+				sameOrg := orggraph.SameOrgHosts(targetHost, pageHost)
+				if !sameHost && !sameOrg {
+					isCrossOrigin = true
+				}
+			}
+			isRiskyExt := false
+			if strings.ContainsAny(h.HrefOrSrc, ".") {
+				lower := strings.ToLower(h.HrefOrSrc)
+				for _, ext := range []string{".exe", ".msi", ".scr", ".bat",
+					".cmd", ".com", ".pif", ".ps1", ".vbs", ".jse", ".wsf",
+					".jar", ".dll", ".apk", ".dmg", ".pkg", ".iso", ".lnk"} {
+					if strings.Contains(lower, ext) {
+						isRiskyExt = true
+						break
+					}
+				}
+			}
+			if isCrossOrigin || isRiskyExt {
+				ctx.HiddenSuspiciousCount++
+			}
+		}
+
+		// ObfuscatedJSIndicators — distinct, non-"external" indicator strings.
+		seen := map[string]struct{}{}
+		for _, j := range render.SuspiciousJS {
+			if j.Indicator == "external" {
+				continue
+			}
+			if _, dup := seen[j.Indicator]; !dup {
+				seen[j.Indicator] = struct{}{}
+				ctx.ObfuscatedJSIndicators = append(ctx.ObfuscatedJSIndicators, j.Indicator)
+			}
+		}
+
+		// HasCrossOriginIframe — hidden iframe from a different origin.
+		for _, f := range render.IFrames {
+			if !f.SameOrigin && !f.Visible {
+				ctx.HasCrossOriginIframe = true
+				break
+			}
+		}
+
+		// HasClickjackOverlay — full-viewport transparent overlay.
+		for _, o := range render.Overlays {
+			if o.CoveragePct >= 25 && o.Transparent && o.InterceptsClicks {
+				ctx.HasClickjackOverlay = true
+				break
+			}
+		}
+	}
+
+	// Phase C.3 — scope-aware trust. Each Trust(host, scope) is a cheap
+	// in-memory map lookup so doing all 6 in a row is fine. The bool
+	// here is "matched the brand AND the scope" (Match.Brand != "").
+	trustedLogin := brandgraph.Trust(in.Domain, brandgraph.ScopeLogin).Brand != ""
+	trustedPayment := brandgraph.Trust(in.Domain, brandgraph.ScopePayment).Brand != ""
+	trustedOAuth := brandgraph.Trust(in.Domain, brandgraph.ScopeOAuthRedirect).Brand != ""
+	trustedScript := brandgraph.Trust(in.Domain, brandgraph.ScopeScriptSource).Brand != ""
+	trustedCDN := brandgraph.Trust(in.Domain, brandgraph.ScopeCDN).Brand != ""
+	trustedDocs := brandgraph.Trust(in.Domain, brandgraph.ScopeDocs).Brand != ""
+	trustedFullBrand := brandgraph.Trust(in.Domain, brandgraph.ScopeFullTrust).Brand != ""
+	trustedAny := brandgraph.IsAnyTrust(in.Domain)
+
+	// Phase D.2 — assemble the trust-score Signals from data we already
+	// extracted into ctx and from brandgraph/orggraph. Pure aggregation;
+	// no I/O here. The Score function is bounded + clamped.
+	tsSignals := trustscore.Signals{
+		DomainAgeDays:       ctx.DomainAgeDays,
+		DomainAgeKnown:      ctx.DomainAgeKnown,
+		FeedClean:           !ctx.FeedHit,
+		VendorDNSClean:      !ctx.VendorDNSBlocked && !ctx.VendorDNSSingleHit,
+		BrandgraphFullTrust: trustedFullBrand,
+		BrandgraphAnyScope:  trustedAny && !trustedFullBrand,
+		OrggraphKnown:       orggraph.OrgOf(in.Domain) != "",
+		// HTTPSValid is a Phase B.5b deliverable (TLS introspection).
+		// Leave false for now; Phase B.5b flips this when the signal exists.
+		HTTPSValid: false,
+		// HistoricalCleanCount lands when we read prior-verdict counters
+		// from Postgres. Leave 0 for now — Phase D.4 hooks it up.
+		HistoricalCleanCount: 0,
+	}
+	tsResult := trustscore.Score(tsSignals)
+	trustContribs := make([]policy.TrustContributor, 0, len(tsResult.Contributors))
+	for _, c := range tsResult.Contributors {
+		trustContribs = append(trustContribs, policy.TrustContributor{
+			Label:  c.Label,
+			Weight: c.Weight,
+		})
+	}
+
 	return policy.Inputs{
 		URL:                   req.URL,
 		Domain:                in.Domain,
@@ -296,9 +478,24 @@ func buildPolicyInputs(
 		Context:               ctx,
 		PageClass:             cls,
 		Paranoid:              req.Paranoid,
+		Mode:                  req.Mode,
 		CategoryBlocks:        req.Categories,
 		VerificationAvailable: render != nil || in.BlocklistHit,
-		TrustedIdentity:       trustreg.IsTrusted(in.Domain),
+		// Legacy aggregate — alias for TrustedAnyScope while Phase D
+		// migrates each soft rule to a specific scope.
+		TrustedIdentity: trustedAny,
+		// Scope-specific fields.
+		TrustedForLogin:   trustedLogin,
+		TrustedForPayment: trustedPayment,
+		TrustedForOAuth:   trustedOAuth,
+		TrustedForScript:  trustedScript,
+		TrustedForCDN:     trustedCDN,
+		TrustedForDocs:    trustedDocs,
+		TrustedAnyScope:   trustedAny,
+		// Phase D.2: trust score + contributors. No rule consults these
+		// yet — Phase E refactors soft rules to ask for the score.
+		TrustScore:        tsResult.Score,
+		TrustContributors: trustContribs,
 	}
 }
 

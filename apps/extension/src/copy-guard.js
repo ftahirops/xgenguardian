@@ -17,6 +17,45 @@
   if (location.protocol === 'chrome-extension:') return;
 
   const MIN_CMD_LENGTH = 8;
+  // Maximum command payload length sent to the API. Sending unbounded text
+  // risks leaking large clipboard pastes and wastes bandwidth; 1000 chars
+  // is ample for any real shell command (audit FINDING #14).
+  const MAX_CMD_SEND = 1000;
+
+  // pageClassFromURL — mirrors background.js SENSITIVE_PATTERNS so copy-guard
+  // skips interception entirely on credential-handling pages. Avoids sending
+  // OAuth tokens / password-reset tokens present in query strings (FINDING #14).
+  function pageClassFromURL(url) {
+    if (/\/oauth|\/authorize|\/consent/i.test(url))             return 'sensitive';
+    if (/\/login|\/signin|\/sign-in|\/log-in/i.test(url))       return 'sensitive';
+    if (/\/verify|\/mfa|\/2fa|\/recover|\/reset/i.test(url))    return 'sensitive';
+    if (/\/payment|\/pay|\/checkout|\/billing/i.test(url))      return 'sensitive';
+    if (/\/admin|\/dashboard|\/console/i.test(url))             return 'sensitive';
+    return 'generic';
+  }
+
+  // stripURL — remove query string and fragment before sending to the API.
+  // Query strings routinely carry OAuth tokens, password-reset nonces, and
+  // email addresses. We only need origin+path for context (FINDING #23).
+  function stripURL(url) {
+    try {
+      const u = new URL(url);
+      return u.origin + u.pathname;
+    } catch {
+      return url.split('?')[0].split('#')[0];
+    }
+  }
+
+  // _recentlyBlocked — set when the intercept fires so the independent
+  // telemetry listener skips the next POST for the same selection (within
+  // 2 s). Prevents sending data we already decided to suppress (FINDING #14).
+  let _recentlyBlocked = false;
+  let _recentlyBlockedTimer = null;
+  function setRecentlyBlocked() {
+    _recentlyBlocked = true;
+    if (_recentlyBlockedTimer) clearTimeout(_recentlyBlockedTimer);
+    _recentlyBlockedTimer = setTimeout(() => { _recentlyBlocked = false; }, 2000);
+  }
 
   // Cache recent verdicts so the same command on the same page doesn't
   // re-roundtrip on every accidental copy. 60s TTL.
@@ -54,10 +93,15 @@
   }
 
   function askVerdict(pageURL, command) {
+    // Strip query/fragment before sending — query strings often carry OAuth
+    // tokens, password-reset nonces, and PII (FINDING #23). Cap payload to
+    // prevent unbounded text being shipped to the API (FINDING #14).
+    const safeURL = stripURL(pageURL);
+    const safeCmd = command.length > MAX_CMD_SEND ? command.slice(0, MAX_CMD_SEND) : command;
     return new Promise((resolve) => {
       try {
         chrome.runtime.sendMessage(
-          { type: 'command-check', page_url: pageURL, command, page_title: document.title },
+          { type: 'command-check', page_url: safeURL, command: safeCmd, page_title: document.title },
           (response) => {
             if (chrome.runtime.lastError || !response) {
               // Fail open on transport errors.
@@ -169,6 +213,12 @@
   const SHELL_HINT_RE = /\b(curl|wget|irm|iwr|powershell|bash|sh|zsh|mshta|rundll32|npm\s+(install|i)|pip3?\s+install|brew\s+(install|tap)|apt(-get)?\s+install|yum\s+install|dnf\s+install|cargo\s+install|go\s+install|choco\s+install|scoop\s+install|code\s+--install-extension|\|\s*(bash|sh|zsh|iex)|base64\s+-d|-EncodedCommand|FromBase64String)\b/i;
 
   document.addEventListener('copy', async (e) => {
+    // Skip interception on credential-handling pages entirely. Copying text
+    // from a login/oauth/payment page is legitimate user activity; sending
+    // those copies (with their URL context) to the API risks leaking tokens
+    // present in the URL's query string (FINDING #14).
+    if (pageClassFromURL(location.href) === 'sensitive') return;
+
     const selectionText = getSelectionText();
     if (!selectionText || selectionText.length < MIN_CMD_LENGTH) return;
     if (!SHELL_HINT_RE.test(selectionText)) return;
@@ -185,9 +235,11 @@
     const v = response.verdict;
     if (v === 'ALLOW') return;
 
-    // Non-ALLOW: stop the copy and ask the user.
+    // Non-ALLOW: stop the copy and ask the user. Mark as recently blocked so
+    // the independent telemetry listener does not POST for the same event.
     e.preventDefault();
     e.stopPropagation();
+    setRecentlyBlocked();
     const proceed = await showWarning(v, selectionText, response);
     if (proceed) {
       try {
@@ -197,13 +249,20 @@
   }, { capture: true });
 
   // Telemetry: report every shell-hint copy to background for aggregation.
+  // Skips sensitive pages (no data from credential contexts) and skips the
+  // first 2 s after a block so we don't double-report a suppressed copy.
   document.addEventListener('copy', () => {
     try {
+      // Don't send telemetry from credential-handling pages (FINDING #14).
+      if (pageClassFromURL(location.href) === 'sensitive') return;
+      // Don't send telemetry if the intercept just blocked this copy.
+      if (_recentlyBlocked) return;
       const sel = getSelectionText();
       if (sel && sel.length >= MIN_CMD_LENGTH && SHELL_HINT_RE.test(sel)) {
         chrome.runtime.sendMessage({
           type: 'copy-telemetry',
-          page_url: location.href,
+          // Strip query/fragment — same rationale as askVerdict (FINDING #23).
+          page_url: stripURL(location.href),
           page_title: document.title,
           length: sel.length,
         });

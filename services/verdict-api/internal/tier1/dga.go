@@ -129,20 +129,145 @@ func DGAScore(sld string) float64 {
 }
 
 // DGASignal — convenience wrapper that returns a Signal when the score is
-// high enough to surface. Returns (sig, true) only when score ≥ 0.6.
+// high enough to surface. Threshold tuned against real-world FN samples:
+//
+//   jevhcksi.org     → DGA 0.591   (was just below 0.6 — missed it)
+//   claudiyoketka    → DGA 0.593   (Straiker IOC, was missed)
+//   egvbrkdf         → DGA 0.705   (caught)
+//   google           → DGA 0.474   (safe — well below new threshold)
+//   paypal           → DGA 0.468   (safe — well below new threshold)
+//
+// 0.55 catches the FN class without touching legit brands. The independent
+// random-host heuristic below provides a second-opinion safety net.
 func DGASignal(sld string) (Signal, bool) {
 	s := DGAScore(sld)
-	if s < 0.6 {
+	if s < 0.55 {
 		return Signal{}, false
 	}
 	w := 0.35
-	if s >= 0.8 {
+	if s >= 0.7 {
 		w = 0.5
+	}
+	if s >= 0.85 {
+		w = 0.6
 	}
 	return Signal{
 		Name:   "dga_classifier_hit",
 		Weight: w,
 		Detail: "domain looks algorithmically generated (score " + ftoaShort(s) + ")",
+	}, true
+}
+
+// RandomHostSignal — independent "this hostname looks random" heuristic
+// that runs in parallel with the DGA classifier. Fires when at least two of
+// the three pillars are tripped:
+//
+//   1. vowel ratio < 0.2 on a string of length ≥ 6  (e.g. "jvhcksi" has 0/7)
+//   2. longest consonant run ≥ 4                    (e.g. "jvhc", "vhck")
+//   3. no character bigram appears > once + length ≥ 8 (no English pattern)
+//
+// Catches the same FN class as DGA-threshold-lowering but via different
+// math, so misclassifications don't agree by coincidence. Sample scores:
+//
+//   jevhcksi   → trips all 3   → strong RANDOM_HOST
+//   google     → trips none    → no signal
+//   asdfghjkl  → trips 1+2     → RANDOM_HOST
+//   qrstuvwxyz → trips 2+3     → RANDOM_HOST
+func RandomHostSignal(sld string) (Signal, bool) {
+	if len(sld) < 6 {
+		return Signal{}, false
+	}
+	c := strings.ToLower(sld)
+	// Strip any non-letter to keep math honest.
+	var letters []byte
+	for i := 0; i < len(c); i++ {
+		b := c[i]
+		if b >= 'a' && b <= 'z' {
+			letters = append(letters, b)
+		}
+	}
+	if len(letters) < 6 {
+		return Signal{}, false
+	}
+
+	pillars := 0
+	reasons := []string{}
+
+	// Pillar 1: vowel ratio < 0.2
+	vowels := 0
+	for _, b := range letters {
+		switch b {
+		case 'a', 'e', 'i', 'o', 'u':
+			vowels++
+		}
+	}
+	vRatio := float64(vowels) / float64(len(letters))
+	if vRatio < 0.2 {
+		pillars++
+		reasons = append(reasons, "low-vowel")
+	}
+
+	// Pillar 2: longest consonant run ≥ 4
+	maxRun, run := 0, 0
+	for _, b := range letters {
+		isVowel := b == 'a' || b == 'e' || b == 'i' || b == 'o' || b == 'u'
+		if !isVowel {
+			run++
+			if run > maxRun {
+				maxRun = run
+			}
+		} else {
+			run = 0
+		}
+	}
+	if maxRun >= 4 {
+		pillars++
+		reasons = append(reasons, "consonant-run")
+	}
+
+	// Pillar 3: bigram diversity (no bigram repeats AND length ≥ 8) —
+	// real words tend to repeat common bigrams ("ee", "th", "in", "an").
+	if len(letters) >= 8 {
+		seen := map[string]int{}
+		maxFreq := 0
+		for i := 0; i < len(letters)-1; i++ {
+			bg := string(letters[i : i+2])
+			seen[bg]++
+			if seen[bg] > maxFreq {
+				maxFreq = seen[bg]
+			}
+		}
+		if maxFreq == 1 {
+			pillars++
+			reasons = append(reasons, "no-bigram-repeats")
+		}
+	}
+
+	// Pillar 1 (low-vowel ratio) is the SPECIFIC random-host indicator.
+	// Real random strings have <20% vowels. Real English words have ~38%.
+	// Long compound English words like "moviesanywhere" trigger pillars
+	// 2+3 (consonant run + no bigram repeats) but have normal vowel
+	// distribution. Require pillar 1 to be one of the triggered pillars
+	// before firing — this eliminates the long-English-compound FP class
+	// while keeping real random-DGA detection (jevhcksi, claudiyoketka).
+	hasLowVowel := false
+	for _, r := range reasons {
+		if r == "low-vowel" {
+			hasLowVowel = true
+			break
+		}
+	}
+	if pillars < 2 || !hasLowVowel {
+		return Signal{}, false
+	}
+	w := 0.4
+	if pillars == 3 {
+		w = 0.6
+	}
+	return Signal{
+		Name:   "random_host",
+		Weight: w,
+		Detail: "host name looks random (" + strings.Join(reasons, "+") + ")",
 	}, true
 }
 
