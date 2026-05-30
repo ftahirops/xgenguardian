@@ -28,6 +28,7 @@ import (
 	"github.com/xgenguardian/services/verdict-api/internal/policy"
 	"github.com/xgenguardian/services/verdict-api/internal/reasons"
 	"github.com/xgenguardian/services/verdict-api/internal/supportscam"
+	"github.com/xgenguardian/services/verdict-api/internal/trustreg"
 	"github.com/xgenguardian/services/verdict-api/internal/trustscore"
 	"github.com/xgenguardian/services/verdict-api/internal/vendordns"
 )
@@ -535,7 +536,15 @@ func buildPolicyInputs(
 	trustedCDN := brandgraph.Trust(in.Domain, brandgraph.ScopeCDN).Brand != ""
 	trustedDocs := brandgraph.Trust(in.Domain, brandgraph.ScopeDocs).Brand != ""
 	trustedFullBrand := brandgraph.Trust(in.Domain, brandgraph.ScopeFullTrust).Brand != ""
-	trustedAny := brandgraph.IsAnyTrust(in.Domain)
+	// Trust resolution: brandgraph FIRST (curated brand trust), then
+	// trustreg as a backward-compatibility fallback. trustreg is where
+	// XGG_LOCAL_TRUSTED_HOSTS entries land — operator-supplied
+	// infrastructure (self-hosted portals, internal IPs, dev VPSs)
+	// that pre-Phase-C used to trip raw-IP / credential-sink hard
+	// rules. Without this fallback, the operator's own evidence
+	// portal at e.g. http://135.181.79.11:18081/ gets BLOCKed by
+	// RAW_IP_HOST despite being explicitly listed as trusted.
+	trustedAny := brandgraph.IsAnyTrust(in.Domain) || trustreg.IsTrusted(in.Domain)
 
 	// Phase D.2 — assemble the trust-score Signals from data we already
 	// extracted into ctx and from brandgraph/orggraph. Pure aggregation;

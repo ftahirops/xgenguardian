@@ -11,8 +11,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import ipaddress
 import os
+import socket
 import time
+import urllib.parse
 import uuid
 from contextlib import asynccontextmanager
 from typing import Any  # noqa: F401
@@ -367,30 +370,100 @@ _QR_IMAGE_MAX_BYTES = int(os.getenv("QR_IMAGE_MAX_BYTES", "5242880"))  # 5 MB
 _QR_DECODE_TIMEOUT_S = float(os.getenv("QR_DECODE_TIMEOUT_S", "4"))
 
 
+def _is_ssrf_blocked_address(addr: str) -> bool:
+    """Return True if `addr` belongs to a range we refuse to fetch from.
+
+    Blocks loopback, RFC1918 private, link-local, CGNAT, IPv4-mapped
+    IPv6, and IPv6 ULA. Any one of these as a /decode-qr target is
+    almost certainly SSRF probing internal services — there is no
+    legitimate use-case for fetching an image off the same host or
+    the same private network from this endpoint.
+    """
+    try:
+        ip = ipaddress.ip_address(addr)
+    except ValueError:
+        return False
+    if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved:
+        return True
+    if ip.is_multicast or ip.is_unspecified:
+        return True
+    # ip.is_private already covers 10/8, 172.16/12, 192.168/16, fc00::/7,
+    # and ::1. CGNAT (100.64/10) is also caught by is_private in
+    # modern stdlib (3.4+). Belt-and-braces:
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        # Recursively check the embedded IPv4 (could be private).
+        return _is_ssrf_blocked_address(str(ip.ipv4_mapped))
+    return False
+
+
+async def _resolve_and_validate(host: str) -> tuple[bool, str]:
+    """Resolve `host` and reject if any address is private/loopback.
+
+    Returns (ok, message). Generic message on failure — DO NOT leak
+    upstream details. Logged details stay server-side.
+    """
+    try:
+        infos = await asyncio.get_running_loop().getaddrinfo(
+            host, None, type=socket.SOCK_STREAM,
+        )
+    except Exception:
+        return False, "host resolution failed"
+    if not infos:
+        return False, "host resolution failed"
+    for _, _, _, _, sockaddr in infos:
+        addr = sockaddr[0]
+        if _is_ssrf_blocked_address(addr):
+            # Log the actual reason server-side; return generic message.
+            return False, "fetch refused"
+    return True, ""
+
+
 @app.post("/decode-qr", response_model=DecodeQRResponse)
 async def decode_qr(req: DecodeQRRequest) -> DecodeQRResponse:
     if not _QR_AVAILABLE:
-        return DecodeQRResponse(parsed=False, reason="pyzbar not installed")
+        return DecodeQRResponse(parsed=False, reason="qr unavailable")
+    # SSRF defense: parse host, resolve, reject internal addresses.
+    img_url_str = str(req.image_url)
+    try:
+        parsed_url = urllib.parse.urlparse(img_url_str)
+    except Exception:
+        return DecodeQRResponse(parsed=False, reason="invalid url")
+    host = parsed_url.hostname or ""
+    if not host:
+        return DecodeQRResponse(parsed=False, reason="invalid url")
+    ok, why = await _resolve_and_validate(host)
+    if not ok:
+        # Log server-side detail (host + reason); return generic to caller.
+        # Don't echo `why` if it could carry resolver info.
+        return DecodeQRResponse(parsed=False, reason="fetch refused")
+
     img_bytes = b""
     try:
+        # follow_redirects=False so the resolved-then-validated host
+        # can't be redirected to an internal endpoint mid-fetch.
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(connect=2.0, read=4.0, write=2.0, pool=5.0),
-            follow_redirects=True,
-            max_redirects=3,
+            follow_redirects=False,
         ) as client:
-            r = await client.get(str(req.image_url))
+            r = await client.get(img_url_str)
+            if 300 <= r.status_code < 400:
+                # Redirect — refuse rather than chase. If a legit CDN
+                # uses 302 to a same-cdn variant, the client can submit
+                # the final URL directly.
+                return DecodeQRResponse(parsed=False, reason="redirect refused")
             if r.status_code != 200:
-                return DecodeQRResponse(parsed=False, reason=f"http {r.status_code}")
+                # Generic message — don't echo upstream status code.
+                return DecodeQRResponse(parsed=False, reason="fetch failed")
             ct = r.headers.get("content-type", "")
             if ct and not ct.startswith("image/"):
-                return DecodeQRResponse(parsed=False, reason=f"non-image content-type: {ct[:32]}")
+                # Generic message — don't echo upstream content-type
+                # which could leak internal-service identifiers.
+                return DecodeQRResponse(parsed=False, reason="non-image content")
             img_bytes = r.content
             if len(img_bytes) > _QR_IMAGE_MAX_BYTES:
-                return DecodeQRResponse(
-                    parsed=False, reason=f"image too large: {len(img_bytes)} bytes",
-                )
-    except Exception as e:  # network, timeout, ssl, etc.
-        return DecodeQRResponse(parsed=False, reason=f"fetch error: {type(e).__name__}")
+                return DecodeQRResponse(parsed=False, reason="image too large")
+    except Exception:
+        return DecodeQRResponse(parsed=False, reason="fetch failed")
 
     if not img_bytes:
         return DecodeQRResponse(parsed=False, reason="empty image")

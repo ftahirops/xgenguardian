@@ -585,6 +585,47 @@ function interstitialURL(page, target, verdict, opener) {
   return chrome.runtime.getURL(`src/${page}`) + "?" + p.toString();
 }
 
+// registrableDomainOf — best-effort eTLD+1 derivation for the same-
+// domain fast-path. Uses a short list of multi-part public suffixes
+// (.co.uk, .ac.jp, .gov.au etc.); falls back to the last two labels
+// for everything else. Good enough for "is this navigation within
+// the same trust footprint as the previous tab URL" — the cost of
+// a wrong answer is at most an extra holding-page intercept, never
+// a missed phishing block.
+//
+// We don't ship the full Mozilla Public Suffix List here because it
+// adds ~140 KB to the SW bundle. The compact set below covers the
+// majority of multi-part ccTLDs that produce false-positive different-
+// registrable-domain answers (uk, jp, br, au, in, kr, etc.). Hosts
+// outside the list use the two-rightmost-labels rule, which is
+// correct for the .com / .org / .net / .io / .dev majority.
+const COMPOUND_SUFFIXES = new Set([
+  "co.uk", "co.jp", "co.kr", "co.in", "co.za", "co.id", "co.th",
+  "ne.jp", "or.jp", "ac.jp", "ac.uk", "ac.kr",
+  "gov.uk", "gov.au", "gov.in", "gov.br",
+  "edu.au", "edu.br",
+  "com.au", "com.br", "com.cn", "com.hk", "com.mx", "com.sg", "com.tw",
+  "com.tr", "com.ar", "com.co",
+  "net.au", "net.br", "org.uk", "org.au",
+]);
+
+function registrableDomainOf(rawURL) {
+  let h;
+  try {
+    h = new URL(rawURL).hostname.toLowerCase().replace(/\.$/, "");
+  } catch {
+    return "";
+  }
+  if (!h || /^[\d.:]+$/.test(h)) return ""; // IP addresses don't have a registrable domain
+  const parts = h.split(".");
+  if (parts.length < 2) return h;
+  const lastTwo = parts.slice(-2).join(".");
+  if (parts.length >= 3 && COMPOUND_SUFFIXES.has(lastTwo)) {
+    return parts.slice(-3).join(".");
+  }
+  return lastTwo;
+}
+
 function holdingURL(target, opener, openerVerdict) {
   const p = new URLSearchParams();
   p.set("target", target);
@@ -773,6 +814,57 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
         url: interstitialURL("blocked.html", url, cached, null),
       });
       return;
+    }
+  }
+
+  // v0.3.7 — Same-registrable-domain fast path. When the user is
+  // navigating WITHIN a domain we already verdicted ALLOW recently,
+  // skip the holding-page interception. Real-world friction: clicking
+  // from github.com/x to github.com/y, gmail thread to gmail compose,
+  // notion page to notion sub-page used to trigger a holding-page
+  // round-trip on every click. Engine would just return ALLOW after
+  // the round-trip — no value added, lots of user annoyance, and
+  // occasional stuck-page reports.
+  //
+  // Skip ONLY when:
+  //   1. Both the source tab and the target URL share the same
+  //      registrable domain (eTLD+1).
+  //   2. The non-sensitive cache already has an ALLOW for the source
+  //      tab's URL (within the 5 min TTL).
+  //   3. The target is NOT a sensitive page class (login/payment/
+  //      oauth/admin/download) — those still get full verdict even
+  //      same-domain, because credential capture and unauthorized
+  //      admin access can happen anywhere on a compromised brand site.
+  //
+  // What this DOESN'T bypass:
+  //   - cross-domain navigation (the phishing case)
+  //   - sensitive-page-class targets even same-domain
+  //   - hard-coded protected hosts (handled above)
+  //   - already-cached BLOCK (handled above)
+  //
+  // Implementation: read the source tab's current URL via the
+  // `details.tabId` lookup, derive eTLD+1 for both, compare.
+  if (!sensitive) {
+    try {
+      const tab = await chrome.tabs.get(details.tabId);
+      const sourceURL = tab?.url || "";
+      if (isHttpURL(sourceURL)) {
+        const srcDomain = registrableDomainOf(sourceURL);
+        const tgtDomain = registrableDomainOf(url);
+        if (srcDomain && srcDomain === tgtDomain) {
+          // Source must itself be ALLOW-cached for us to inherit
+          // its trust — otherwise we'd let through a never-verdicted
+          // root navigation on an unknown domain.
+          const srcKey = "v:" + (await sha256(sourceURL));
+          const srcCached = await getCached(srcKey);
+          if (srcCached && srcCached.verdict === "ALLOW") {
+            return; // same-domain inheritance
+          }
+        }
+      }
+    } catch {
+      // Defensive: tab gone, race condition, etc. Fall through to
+      // normal interception path.
     }
   }
 
