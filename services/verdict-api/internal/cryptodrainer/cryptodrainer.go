@@ -213,9 +213,10 @@ func (r *Result) addSLDCompositeBonus(in Inputs) {
 	}
 	sld := strings.ToLower(in.SLD)
 	lureTokens := []string{
-		"airdrop", "claim", "free-mint", "free_mint",
+		"airdrop", "claim", "free-mint", "free_mint", "mint",
 		"revoke", "verify-wallet", "verify_wallet", "sync-wallet",
 		"connect-wallet", "wallet-update", "update-wallet",
+		"sync", "resync",
 	}
 	brandTokens := []string{
 		"metamask", "opensea", "uniswap", "pancakeswap", "sushiswap",

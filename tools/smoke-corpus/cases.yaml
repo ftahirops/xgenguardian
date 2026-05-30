@@ -563,3 +563,521 @@ cases:
     url: https://example.com/page#section
     expect: any-allow
     category: edge-case
+
+  # ============================================================================
+  # Wave 3 expansion — 100 → ~200 cases.
+  # Targets categories the new detectors should catch (post-Wave-3) and new
+  # gap-finding categories the next waves can attack.
+  # ============================================================================
+
+  # ---- more crypto-drainer variants ----
+  - name: drainer-uniswap-claim
+    url: https://uniswap-claim-tokens.example/connect
+    expect: any-deny
+    category: crypto-drainer
+
+  - name: drainer-pancakeswap-airdrop
+    url: https://pancakeswap-airdrop-claim.example/wallet
+    expect: any-deny
+    category: crypto-drainer
+
+  - name: drainer-arbitrum-mint
+    url: https://arbitrum-claim-mint.example/sync
+    expect: any-deny
+    category: crypto-drainer
+
+  - name: drainer-revoke-cash-spoof
+    url: https://revoke-cash-secure.example/clean
+    expect: any-deny
+    category: crypto-drainer
+
+  - name: drainer-wallet-validate
+    url: https://wallet-validate-update.example/resync
+    expect: any-deny
+    category: crypto-drainer
+
+  - name: drainer-trustwallet
+    url: https://trustwallet-update-required.example/
+    expect: any-deny
+    category: crypto-drainer
+
+  - name: drainer-phantom-wallet
+    url: https://phantom-sync-wallet.example/connect
+    expect: any-deny
+    category: crypto-drainer
+
+  - name: drainer-blur-airdrop
+    url: https://blur-airdrop-claim.example/
+    expect: any-deny
+    category: crypto-drainer
+
+  # ---- more support-scam variants ----
+  - name: scam-norton-support
+    url: https://norton-support-helpline.example/contact
+    expect: any-deny
+    category: support-scam
+
+  - name: scam-mcafee-renewal
+    url: https://mcafee-renewal-support.example/call
+    expect: any-deny
+    category: support-scam
+
+  - name: scam-amazon-support
+    url: https://amazon-support-helpline-247.example/contact
+    expect: any-deny
+    category: support-scam
+
+  - name: scam-google-virus-warning
+    url: https://google-virus-alert-help.example/
+    expect: any-deny
+    category: support-scam
+
+  - name: scam-icloud-locked
+    url: https://icloud-account-locked-support.example/recover
+    expect: any-deny
+    category: support-scam
+
+  - name: scam-windows-error
+    url: https://windows-error-virus-alert.example/contact
+    expect: any-deny
+    category: support-scam
+
+  # ---- more payment-scam variants ----
+  - name: payment-scam-tax-refund-uk
+    url: https://hmrc-tax-refund-claim.example/file
+    expect: any-deny
+    category: payment-scam
+
+  - name: payment-scam-medicare-refund
+    url: https://medicare-refund-claim-instant.example/
+    expect: any-deny
+    category: payment-scam
+
+  - name: payment-scam-fake-paypal-invoice
+    url: https://paypal-invoice-overdue.example/pay
+    expect: any-deny
+    category: payment-scam
+
+  - name: payment-scam-lottery
+    url: https://lottery-claim-winner-2026.example/
+    expect: any-deny
+    category: payment-scam
+
+  - name: payment-scam-inheritance
+    url: https://inheritance-claim-beneficiary.example/
+    expect: any-deny
+    category: payment-scam
+
+  - name: payment-scam-customs-fee
+    url: https://customs-duty-unpaid-claim.example/
+    expect: any-deny
+    category: payment-scam
+
+  - name: payment-scam-ssn-suspended
+    url: https://social-security-number-suspended.example/
+    expect: any-deny
+    category: payment-scam
+
+  - name: payment-scam-geek-squad-invoice
+    url: https://geek-squad-renewal-invoice.example/
+    expect: any-deny
+    category: payment-scam
+
+  # ---- IDN homoglyph extended ----
+  - name: idn-microsoft-cyrillic-o
+    url: https://microsоft.example/
+    expect: any-deny
+    category: idn-homoglyph
+
+  - name: idn-amazon-cyrillic-a
+    url: https://аmazon.example/
+    expect: any-deny
+    category: idn-homoglyph
+
+  - name: idn-github-cyrillic-h
+    url: https://githuh.example/login
+    expect: any-deny
+    category: idn-homoglyph
+
+  - name: idn-apple-cyrillic-p
+    url: https://aрple.example/signin
+    expect: any-deny
+    category: idn-homoglyph
+
+  # ---- punycode + brand impersonation ----
+  - name: punycode-google
+    url: https://xn--ggle-vsa.example/
+    expect: any
+    category: punycode
+
+  # ---- international banking impersonation ----
+  - name: fake-bank-hsbc
+    url: https://hsbc-online-update.example/login
+    expect: any-deny
+    category: fake-banking
+
+  - name: fake-bank-barclays
+    url: https://barclays-secure-login.example/account
+    expect: any-deny
+    category: fake-banking
+
+  - name: fake-bank-santander
+    url: https://santander-mobile-verify.example/signin
+    expect: any-deny
+    category: fake-banking
+
+  - name: fake-bank-deutsche
+    url: https://deutsche-bank-update.example/login
+    expect: any-deny
+    category: fake-banking
+
+  - name: fake-bank-rbc
+    url: https://rbc-online-banking-update.example/login
+    expect: any-deny
+    category: fake-banking
+
+  - name: fake-bank-natwest
+    url: https://natwest-account-secure.example/login
+    expect: any-deny
+    category: fake-banking
+
+  # ---- legit international banking ----
+  - name: bank-real-hsbc
+    url: https://www.hsbc.com/
+    expect: any-allow
+    category: legit-banking
+
+  - name: bank-real-deutsche
+    url: https://www.db.com/
+    expect: any-allow
+    category: legit-banking
+
+  - name: bank-real-rbc
+    url: https://www.rbcroyalbank.com/personal.html
+    expect: any-allow
+    category: legit-banking
+
+  # ---- OAuth-phish extended (seeded registry helps these) ----
+  - name: oauth-phish-pretend-vscode
+    url: https://github.com/login/oauth/authorize?client_id=99999unknown99999&scope=repo+admin:org
+    expect: any-deny
+    category: oauth-phish
+
+  - name: oauth-phish-pretend-gcloud
+    url: https://accounts.google.com/o/oauth2/v2/auth?client_id=fake-app.apps.googleusercontent.com&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive
+    expect: any-deny
+    category: oauth-phish
+
+  - name: oauth-legit-github-mobile
+    url: https://github.com/login/oauth/authorize?client_id=Iv1.20e0ec51e1301adc&scope=repo
+    expect: any-allow
+    category: oauth-legit
+
+  - name: oauth-legit-azure-cli
+    url: https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=04b07795-8ddb-461a-bbee-02f9e1bf7b46&scope=https%3A%2F%2Fmanagement.azure.com%2F.default
+    expect: any-allow
+    category: oauth-legit
+
+  # ---- MFA prompt bombing URLs ----
+  - name: mfa-fake-okta-push
+    url: https://okta-secure-verify-push.example/auth
+    expect: any-deny
+    category: mfa-bombing
+
+  - name: mfa-fake-duo
+    url: https://duo-mobile-verify-push.example/auth
+    expect: any-deny
+    category: mfa-bombing
+
+  # ---- subdomain spoofing (real brand on attacker apex) ----
+  - name: subdomain-spoof-paypal
+    url: https://paypal.com.attacker.example/login
+    expect: any-deny
+    category: subdomain-spoof
+
+  - name: subdomain-spoof-google-accounts
+    url: https://accounts.google.com.attacker.example/oauth/consent
+    expect: any-deny
+    category: subdomain-spoof
+
+  - name: subdomain-spoof-microsoft-login
+    url: https://login.microsoftonline.com.attacker.example/
+    expect: any-deny
+    category: subdomain-spoof
+
+  # ---- session-hijack lures ----
+  - name: session-hijack-fake-signin
+    url: https://signin-validate-session.example/expired
+    expect: any-deny
+    category: session-hijack
+
+  - name: session-hijack-fake-token
+    url: https://verify-token-renewal.example/auth
+    expect: any-deny
+    category: session-hijack
+
+  # ---- direct-download malware patterns ----
+  - name: direct-download-exe
+    url: http://download-installer.example/setup.exe
+    expect: any-deny
+    category: direct-download
+
+  - name: direct-download-jar
+    url: http://compromised-host.example/installer.jar
+    expect: any-deny
+    category: direct-download
+
+  - name: direct-download-msi
+    url: http://fake-update.example/security-update.msi
+    expect: any-deny
+    category: direct-download
+
+  # ---- shortener with risky destination chain ----
+  - name: shortener-bitly-corrupt
+    url: https://bit.ly/3ABCxyz
+    expect: any
+    category: shortener
+
+  # ---- more legit major brands ----
+  - name: legit-aws-docs
+    url: https://docs.aws.amazon.com/
+    expect: any-allow
+    category: legit-major
+
+  - name: legit-microsoft-learn
+    url: https://learn.microsoft.com/
+    expect: any-allow
+    category: legit-major
+
+  - name: legit-vercel
+    url: https://vercel.com/
+    expect: any-allow
+    category: legit-major
+
+  - name: legit-anthropic
+    url: https://www.anthropic.com/
+    expect: any-allow
+    category: legit-major
+
+  - name: legit-openai
+    url: https://openai.com/
+    expect: any-allow
+    category: legit-major
+
+  # ---- more legit dev sites ----
+  - name: legit-rust-docs
+    url: https://doc.rust-lang.org/
+    expect: any-allow
+    category: legit-dev
+
+  - name: legit-python-docs
+    url: https://docs.python.org/3/
+    expect: any-allow
+    category: legit-dev
+
+  - name: legit-go-pkg
+    url: https://pkg.go.dev/
+    expect: any-allow
+    category: legit-dev
+
+  # ---- ccTLD spam-risk extended ----
+  - name: cctld-ml
+    url: http://example.ml/
+    expect: any
+    category: sus-tld
+
+  - name: cctld-ga
+    url: http://example.ga/
+    expect: any
+    category: sus-tld
+
+  - name: cctld-cf
+    url: http://example.cf/
+    expect: any
+    category: sus-tld
+
+  # ---- shared-hosting more variants ----
+  - name: shared-host-pages-dev
+    url: https://random-tenant.pages.dev/
+    expect: any
+    category: shared-host
+
+  - name: shared-host-workers-dev
+    url: https://something.workers.dev/
+    expect: any
+    category: shared-host
+
+  - name: shared-host-wordpress
+    url: https://random-site.wordpress.com/
+    expect: any-allow
+    category: shared-host
+
+  # ---- legit-content variants ----
+  - name: legit-content-medium
+    url: https://medium.com/
+    expect: any-allow
+    category: legit-content
+
+  - name: legit-content-substack
+    url: https://substack.com/
+    expect: any-allow
+    category: legit-content
+
+  - name: legit-content-news-nytimes
+    url: https://www.nytimes.com/
+    expect: any-allow
+    category: legit-content
+
+  - name: legit-content-reddit
+    url: https://www.reddit.com/
+    expect: any-allow
+    category: legit-content
+
+  # ---- legit-saas variants ----
+  - name: legit-saas-canva
+    url: https://www.canva.com/
+    expect: any-allow
+    category: legit-saas
+
+  - name: legit-saas-figma
+    url: https://www.figma.com/
+    expect: any-allow
+    category: legit-saas
+
+  - name: legit-saas-airtable
+    url: https://www.airtable.com/
+    expect: any-allow
+    category: legit-saas
+
+  - name: legit-saas-linear
+    url: https://linear.app/
+    expect: any-allow
+    category: legit-saas
+
+  # ---- legit-cdn variants ----
+  - name: legit-cdn-jquery
+    url: https://code.jquery.com/jquery-3.7.0.min.js
+    expect: any-allow
+    category: legit-cdn
+
+  # ---- benign tracking pixels (must not over-block) ----
+  - name: benign-pixel-fb
+    url: https://www.facebook.com/tr/
+    expect: any-allow
+    category: legit-tracker
+
+  # ---- benign hidden iframes on legit sites ----
+  # (none — these get caught by sandbox heuristics)
+
+  # ---- explicit allowlist edge cases ----
+  - name: edge-case-numeric-domain
+    url: https://12345.example/
+    expect: any
+    category: edge-case
+
+  - name: edge-case-very-long-url
+    url: https://example.com/very/long/path/with/many/segments/and/query?a=1&b=2&c=3&d=4&e=5&f=6&g=7
+    expect: any-allow
+    category: edge-case
+
+  - name: edge-case-non-standard-tld
+    url: https://example.museum/
+    expect: any-allow
+    category: edge-case
+
+  # ---- new-domain payment (sensitive on fresh) ----
+  - name: fresh-payment-wallet-connect
+    url: https://wallet-connect-2026.example/sync
+    expect: any-deny
+    category: fresh-payment
+
+  - name: fresh-payment-new-bank-login
+    url: https://new-secure-bank-2026.example/login
+    expect: any-deny
+    category: fresh-payment
+
+  # ---- developer impersonation extended ----
+  - name: dev-install-fake-rust
+    url: https://rust-installer-quick.example/setup
+    expect: any-deny
+    category: install-lure
+
+  - name: dev-install-fake-docker
+    url: https://docker-installer-official.example/install
+    expect: any-deny
+    category: install-lure
+
+  - name: dev-install-fake-terraform
+    url: https://terraform-cli-installer.example/download
+    expect: any-deny
+    category: install-lure
+
+  - name: dev-install-fake-go
+    url: https://golang-installer-quick.example/installer
+    expect: any-deny
+    category: install-lure
+
+  # ---- typosquat extended (homoglyph hard rule) ----
+  - name: typo-microsoft-omission
+    url: https://micosoft.example/login
+    expect: any-deny
+    category: typosquat
+
+  - name: typo-amazon-shuffle
+    url: https://amzaon.example/signin
+    expect: any-deny
+    category: typosquat
+
+  - name: typo-paypal-double
+    url: https://paypall.example/signin
+    expect: any-deny
+    category: typosquat
+
+  - name: typo-google-h
+    url: https://gohgle.example/
+    expect: any-deny
+    category: typosquat
+
+  # ---- benign sites that contain trigger words ----
+  - name: benign-wikipedia-gift-card
+    url: https://en.wikipedia.org/wiki/Gift_card
+    expect: any-allow
+    category: benign-trigger
+
+  - name: benign-wikipedia-phishing
+    url: https://en.wikipedia.org/wiki/Wire_fraud
+    expect: any-allow
+    category: benign-trigger
+
+  - name: benign-news-irs-tax
+    url: https://www.bbc.com/news/business
+    expect: any-allow
+    category: benign-trigger
+
+  # ---- raw-IP extended ----
+  - name: raw-ip-cn-vps
+    url: http://45.32.99.99/x86_64
+    expect: block
+    category: raw-ip
+
+  - name: raw-ip-private-cgnat
+    url: http://100.64.0.1/file
+    expect: any
+    category: raw-ip
+
+  # ---- HTTP-only fresh-domain ----
+  - name: http-fresh-domain
+    url: http://new-promo-2026.example/
+    expect: any
+    category: http-only
+
+  # ---- corrupt URLs ----
+  - name: corrupt-spaces
+    url: "https://example.com/ path with spaces"
+    expect: any
+    category: malformed
+
+  - name: corrupt-protocol
+    url: htts://example.com/
+    expect: any
+    category: malformed

@@ -216,6 +216,20 @@ func FromURL(rawurl string) Class {
 	if strings.Contains(pathOnly, "/download") {
 		return Download
 	}
+	// Wave 3 corpus-driven fallback. URLs whose path ends in a known-
+	// risky executable / archive / script extension are Downloads
+	// regardless of host or path-keyword. Catches the
+	// compromised-host.example/installer.jar smoke case where the
+	// host is innocuous but the path is the weapon.
+	for _, ext := range []string{
+		".exe", ".scr", ".msi", ".bat", ".cmd", ".ps1", ".vbs",
+		".jar", ".apk", ".dmg", ".iso", ".img",
+		".hta", ".chm", ".jnlp", ".lnk",
+	} {
+		if strings.HasSuffix(pathOnly, ext) {
+			return Download
+		}
+	}
 	// Wave 2.5 — SLD-keyword fallback. URLs like
 	//   https://bank-login-secure-2026.example/
 	//   https://paypal-account-security.example/

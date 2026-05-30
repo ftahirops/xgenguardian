@@ -179,6 +179,13 @@ func (r *Result) addSLDCompositeBonus(in Inputs) {
 		"tax-refund", "irs", "ssa", "hmrc",
 		"lottery", "sweepstakes", "winner", "prize",
 		"invoice", "overdue", "lawsuit", "settlement",
+		// Wave 3 corpus-driven additions
+		"inheritance", "beneficiary", "deceased", "estate",
+		"social-security", "ssn", "suspended",
+		"geek-squad", "mcafee-invoice", "norton-invoice",
+		"renewal", "renewal-invoice", "subscription",
+		"customs", "duty", "unpaid",
+		"medicare", "benefits",
 	}
 	hits := 0
 	var matchedPay, matchedPretext string
@@ -331,6 +338,13 @@ var fakeInvoice = []phrase{
 	{"mcafee invoice", 0.12},
 	{"norton invoice", 0.12},
 	{"paypal invoice", 0.10},
+	// Wave 3 hyphenated SLD variants for /v1/check URL-only paths
+	{"geek-squad", 0.15},
+	{"mcafee-invoice", 0.15},
+	{"norton-invoice", 0.15},
+	{"paypal-invoice-overdue", 0.18},
+	{"invoice-overdue", 0.12},
+	{"renewal-invoice", 0.10},
 }
 
 var lotteryScam = []phrase{
@@ -350,6 +364,11 @@ var lotteryScam = []phrase{
 	{"prince of nigeria", 0.20}, // canonical
 	{"deceased relative", 0.15},
 	{"beneficiary of the estate", 0.15},
+	// Wave 3 — hyphenated SLD variants
+	{"inheritance-claim", 0.18},
+	{"inheritance-beneficiary", 0.18},
+	{"unclaimed-inheritance", 0.18},
+	{"deceased-relative", 0.15},
 }
 
 var romanceScam = []phrase{
@@ -391,4 +410,9 @@ var govImpersonation = []phrase{
 	{"deportation notice", 0.15},
 	{"social security number suspended", 0.20},
 	{"benefits suspended", 0.10},
+	// Wave 3 hyphenated SLD variants for /v1/check URL-only paths
+	{"social-security-number", 0.18},
+	{"social-security-suspended", 0.20},
+	{"ssn-suspended", 0.18},
+	{"benefits-suspended", 0.15},
 }

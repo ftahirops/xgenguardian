@@ -511,6 +511,11 @@ func (s *Server) runPipelineWithTier(ctx context.Context, req checkRequest, tier
 			out, diff := policy.RunShadow(policyIn, cand)
 			policyOut = out
 			recordShadowDiff(policyIn.Domain, diff)
+			// Wave 3 Phase 4 — also record the candidate's raw
+			// normalized risk score for distribution analysis. Lets
+			// the weekly report compute "p50/p90 of candidate score"
+			// across benign vs malicious traffic.
+			recordRiskScoreFromCandidate(policyIn)
 		} else {
 			policyOut = policy.Apply(policyIn)
 		}
@@ -792,6 +797,13 @@ type renderResponse struct {
 	// internal/cryptodrainer when it ships) for phrase scoring. Empty
 	// when sandbox-render is older or extraction failed.
 	VisibleText      string            `json:"visible_text,omitempty"`
+	// OCRText — Wave 3 Phase 3. Tesseract OCR over the screenshot.
+	// Catches phone numbers, gift-card demands, and brand logos
+	// rendered as IMAGE content rather than HTML text. Capped at
+	// 32 KB server-side. Empty when OCR was disabled, timed out, or
+	// the sandbox is pre-Phase-3.
+	OCRText          string            `json:"ocr_text,omitempty"`
+	OCRMs            int               `json:"ocr_ms,omitempty"`
 	EvidenceID       string            `json:"evidence_id"`
 	ScreenshotURL    string            `json:"screenshot_url"`
 	DOMURL           string            `json:"dom_url"`

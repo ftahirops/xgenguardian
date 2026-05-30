@@ -213,15 +213,17 @@ func buildPolicyInputs(
 	// don't fire.
 	sld := pageclassExtractSLD(req.URL)
 	title := renderTitle(render)
-	var visibleText string
+	var visibleText, ocrText string
 	if render != nil {
 		visibleText = render.VisibleText
+		ocrText = render.OCRText
 	}
 	ssRes := supportscam.Score(supportscam.Inputs{
 		URL:              req.URL,
 		SLD:              sld,
 		Title:            title,
 		VisibleText:      visibleText,
+		OCRText:          ocrText,
 		Host:             in.Domain,
 		HostInBrandgraph: brandgraph.IsAnyTrust(in.Domain),
 	})
@@ -234,6 +236,7 @@ func buildPolicyInputs(
 		SLD:              sld,
 		Title:            title,
 		VisibleText:      visibleText,
+		OCRText:          ocrText,
 		Host:             in.Domain,
 		HostInBrandgraph: brandgraph.IsAnyTrust(in.Domain),
 	})
@@ -255,6 +258,7 @@ func buildPolicyInputs(
 		SLD:              sld,
 		Title:            title,
 		VisibleText:      visibleText,
+		OCRText:          ocrText,
 		Host:             in.Domain,
 		HostInBrandgraph: brandgraph.IsAnyTrust(in.Domain),
 		ScriptIndicators: scriptIndicators,

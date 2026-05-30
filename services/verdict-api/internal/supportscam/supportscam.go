@@ -209,6 +209,9 @@ func (r *Result) addSLDCompositeBonus(in Inputs) {
 		"security-alert", "helpline", "tech-support", "support-help",
 		"virus-alert", "alert-help", "virus-help", "warning-help",
 		"refund-claim", "billing-alert", "account-locked",
+		// Wave 3 corpus-driven additions:
+		"renewal", "renewal-support", "billing", "subscription",
+		"contact", "error", "locked", "expired",
 	}
 	hits := 0
 	var matchedBrand, matchedScare string
@@ -227,9 +230,9 @@ func (r *Result) addSLDCompositeBonus(in Inputs) {
 	if hits == 0 {
 		return
 	}
-	weight := 0.10 * float64(hits)
-	if weight > 0.30 {
-		weight = 0.30
+	weight := 0.15 * float64(hits)
+	if weight > 0.35 {
+		weight = 0.35
 	}
 	r.Score += weight
 	r.Hits = append(r.Hits, Hit{

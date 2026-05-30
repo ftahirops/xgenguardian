@@ -25,6 +25,15 @@ from playwright.async_api import async_playwright, Browser, Playwright
 from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST
 from pydantic import BaseModel, HttpUrl
 
+import io
+
+try:
+    import pytesseract
+    from PIL import Image
+    _OCR_AVAILABLE = True
+except ImportError:  # pragma: no cover — sandbox can run without OCR
+    _OCR_AVAILABLE = False
+
 from .challenge import detect_challenge
 from .dom_inventory import (
     _DOM_INVENTORY_JS,
@@ -108,6 +117,38 @@ MAX_CONCURRENT_RENDERS_ASYNC = int(os.getenv("MAX_CONCURRENT_RENDERS_ASYNC", "4"
 # payment-scam, crypto-drainer) without bloating the response or the
 # evidence row. Runaway pages get truncated, not failed.
 VISIBLE_TEXT_MAX_BYTES = int(os.getenv("VISIBLE_TEXT_MAX_BYTES", "51200"))
+
+# Wave 3 Phase 3 — OCR over screenshot. Caps OCR text at this size; OCR
+# itself is also bounded by Tesseract's per-call budget. Set to 0 to
+# disable OCR even when pytesseract is importable (useful when sandbox
+# is under memory pressure).
+OCR_TEXT_MAX_BYTES = int(os.getenv("OCR_TEXT_MAX_BYTES", "32768"))
+OCR_TIMEOUT_S      = float(os.getenv("OCR_TIMEOUT_S", "8"))
+
+
+def _run_ocr(png_bytes: bytes) -> str:
+    """Synchronous OCR over a PNG. Runs in a thread via to_thread.
+
+    Conservative configuration: --oem 3 (default LSTM), --psm 6
+    (uniform block of text — works for most scam-page screenshots
+    where text is mixed with imagery). Multi-language disabled
+    (English only) so the Tesseract process stays small.
+    """
+    if not _OCR_AVAILABLE:
+        return ""
+    try:
+        img = Image.open(io.BytesIO(png_bytes))
+        # Downscale to bound CPU. Drainer / scam pages render fine
+        # at 1280-wide; full retina screenshots cost 5× more without
+        # better OCR accuracy.
+        if img.width > 1600:
+            ratio = 1600 / img.width
+            img = img.resize((1600, int(img.height * ratio)), Image.BILINEAR)
+        return pytesseract.image_to_string(
+            img, lang="eng", config="--oem 3 --psm 6"
+        )
+    except Exception:
+        return ""
 RENDER_QUEUE_TIMEOUT_S       = float(os.getenv("RENDER_QUEUE_TIMEOUT_S", "10"))
 
 # Created in lifespan() so they're bound to the loop.
@@ -274,6 +315,13 @@ class RenderResponse(BaseModel):
     # echoes it back to the user without escaping. Phase 3 will add
     # ocr_text alongside this from screenshot OCR.
     visible_text: str = ""
+    # Wave 3 Phase 3 — Tesseract OCR over the screenshot. Catches phone
+    # numbers, gift-card demands, and payment-method text rendered as
+    # IMAGES instead of HTML. Empty string when pytesseract is not
+    # importable, OCR timed out, or OCR_TEXT_MAX_BYTES = 0. Consumed by
+    # supportscam/paymentscam/cryptodrainer's Inputs.OCRText field.
+    ocr_text: str = ""
+    ocr_ms:   int = 0
 
 
 @app.get("/healthz")
@@ -707,6 +755,27 @@ async def _do_render(req: RenderRequest) -> RenderResponse:
         except Exception:
             visible_text = ""
 
+        # Wave 3 Phase 3 — Tesseract OCR over the screenshot. Catches
+        # phone numbers, gift-card payment demands, and brand logos
+        # rendered as IMAGE content rather than HTML text. Bounded by
+        # OCR_TIMEOUT_S so a pathological image doesn't stall the
+        # render. Tesseract runs in a thread to avoid blocking the
+        # event loop.
+        ocr_text = ""
+        ocr_ms = 0
+        if _OCR_AVAILABLE and OCR_TEXT_MAX_BYTES > 0:
+            try:
+                ocr_t0 = time.time()
+                ocr_text = await asyncio.wait_for(
+                    asyncio.to_thread(_run_ocr, screenshot_bytes),
+                    timeout=OCR_TIMEOUT_S,
+                )
+                ocr_text = (ocr_text or "")[:OCR_TEXT_MAX_BYTES]
+                ocr_ms = int((time.time() - ocr_t0) * 1000)
+            except (asyncio.TimeoutError, Exception):
+                ocr_text = ""
+                ocr_ms = 0
+
         # Bot-protection challenge detection. Run BEFORE form/download extraction
         # because nothing else on a challenge page is meaningful.
         is_challenge, challenge_kind = detect_challenge(title, html, final_url)
@@ -932,6 +1001,8 @@ async def _do_render(req: RenderRequest) -> RenderResponse:
             suspicious_js=inventory["suspicious_js"],
             overlays=inventory["overlays"],
             visible_text=visible_text,
+            ocr_text=ocr_text,
+            ocr_ms=ocr_ms,
         )
     finally:
         try:

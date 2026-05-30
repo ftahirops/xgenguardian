@@ -185,6 +185,19 @@ var (
 		},
 		[]string{"code"},
 	)
+
+	// Wave 3 Phase 4 — normalized-risk-score distribution. Histogram
+	// over the 0..1 score the candidate engine produced. Lets the
+	// rule-health report compute "P50/P90 normalized risk on benign
+	// traffic" vs same on smoke-corpus malicious. The corpus diff is
+	// the gate for Phase 5 enforcement.
+	NormalizedRiskScore = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "xgg_risk_normalized_score",
+			Help:    "Distribution of the Wave 3 candidate normalized risk score per /v1/check (XGG_SHADOW_ENABLED=1).",
+			Buckets: []float64{0.05, 0.10, 0.20, 0.30, 0.40, 0.50, 0.55, 0.65, 0.70, 0.80, 0.85, 0.95},
+		},
+	)
 )
 
 // MustRegister registers all verdict-api metrics with the given registerer.
@@ -208,5 +221,6 @@ func MustRegister(r prometheus.Registerer) {
 		RuleVerdictTotal,
 		RuleOverrideTotal,
 		RuleFPReportTotal,
+		NormalizedRiskScore,
 	)
 }
