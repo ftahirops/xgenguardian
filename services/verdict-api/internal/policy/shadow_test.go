@@ -12,7 +12,7 @@ import (
 
 func TestShadow_NilCandidate_NoDiff(t *testing.T) {
 	in := base(Inputs{
-		Context: ContextOutput{HasCrossOriginIframe: true},
+		Context: ContextOutput{HasCrossOriginIframe: true, HiddenCrossOriginIframeCount: 3},
 	})
 	prod, diff := RunShadow(in, nil)
 	if prod.Verdict != Warn {
@@ -43,7 +43,7 @@ func TestShadow_IdentityCandidate_Clean(t *testing.T) {
 
 func TestShadow_VerdictChanged_Detected(t *testing.T) {
 	in := base(Inputs{
-		Context: ContextOutput{HasCrossOriginIframe: true},
+		Context: ContextOutput{HasCrossOriginIframe: true, HiddenCrossOriginIframeCount: 3},
 	})
 	// Candidate forces ISOLATE — production would WARN on a hidden iframe.
 	candidate := func(Inputs) Result {
@@ -90,7 +90,7 @@ func TestShadow_ReasonsAdded_Detected(t *testing.T) {
 
 func TestShadow_ReasonsRemoved_Detected(t *testing.T) {
 	in := base(Inputs{
-		Context: ContextOutput{HasCrossOriginIframe: true},
+		Context: ContextOutput{HasCrossOriginIframe: true, HiddenCrossOriginIframeCount: 3},
 	})
 	// Candidate quiets the hidden-iframe reason while preserving the verdict.
 	candidate := func(in Inputs) Result {
@@ -109,7 +109,7 @@ func TestShadow_ReasonsRemoved_Detected(t *testing.T) {
 
 func TestShadow_Kind_VerdictChangedTrumpsReasons(t *testing.T) {
 	in := base(Inputs{
-		Context: ContextOutput{HasCrossOriginIframe: true},
+		Context: ContextOutput{HasCrossOriginIframe: true, HiddenCrossOriginIframeCount: 3},
 	})
 	candidate := func(in Inputs) Result {
 		// Different verdict AND different reasons — verdict_changed wins.
@@ -125,7 +125,7 @@ func TestShadow_Kind_VerdictChangedTrumpsReasons(t *testing.T) {
 
 func TestShadow_ConfidenceDrift_DoesNotMarkDirty(t *testing.T) {
 	in := base(Inputs{
-		Context: ContextOutput{HasCrossOriginIframe: true},
+		Context: ContextOutput{HasCrossOriginIframe: true, HiddenCrossOriginIframeCount: 3},
 	})
 	candidate := func(in Inputs) Result {
 		r := Apply(in)
@@ -146,7 +146,7 @@ func TestShadow_ConfidenceDrift_DoesNotMarkDirty(t *testing.T) {
 func TestShadow_CandidateMustNotLeakIntoUserResult(t *testing.T) {
 	in := base(Inputs{
 		PageClass: pageclass.Login,
-		Context:   ContextOutput{HasCrossOriginIframe: true},
+		Context:   ContextOutput{HasCrossOriginIframe: true, HiddenCrossOriginIframeCount: 3},
 	})
 	candidate := func(Inputs) Result {
 		// Candidate wants to ISOLATE the user — must NOT happen.

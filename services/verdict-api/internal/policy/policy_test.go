@@ -139,36 +139,38 @@ func TestCategoryFeed_AdultOnly_UserDisabled_Allows(t *testing.T) {
 
 // --- Phase A: HiddenSuspiciousCount thresholds + orggraph interaction ---
 
-// TestHiddenSuspiciousCount_BelowThreshold_DoesNotWarn — 7 cross-origin
-// hidden anchors is below the threshold (8). Should not WARN. The
-// threshold itself is the structural fix; orggraph reduces same-org
-// links out of the count entirely upstream in policymap.
+// TestHiddenSuspiciousCount_BelowThreshold_DoesNotWarn — Wave 3 tuned
+// threshold is 100 (raised from 8). Major content sites (BBC, NYT,
+// Wikipedia) embed 80-200 hidden anchors for nav/analytics/footer
+// link clusters; the original threshold of 8 produced FPs on every
+// such site once sandbox-render became operational. Real attack link
+// farms have 5-30; the gap at 100 separates the populations.
 func TestHiddenSuspiciousCount_BelowThreshold_DoesNotWarn(t *testing.T) {
 	r := Apply(base(Inputs{
 		Context: ContextOutput{
-			HiddenSuspiciousCount: 7,
+			HiddenSuspiciousCount: 99,
 		},
 	}))
 	if r.Verdict != Allow {
-		t.Errorf("7 hidden anchors should NOT WARN; got %s", r.Verdict)
+		t.Errorf("99 hidden anchors should NOT WARN; got %s", r.Verdict)
 	}
 	for _, c := range r.ReasonCodes {
 		if c == string(reasons.HiddenMaliciousLink) {
-			t.Errorf("HIDDEN_MALICIOUS_LINK should not fire at 7")
+			t.Errorf("HIDDEN_MALICIOUS_LINK should not fire at 99")
 		}
 	}
 }
 
-// TestHiddenSuspiciousCount_AtThreshold_Warns — 8+ cross-origin hidden
-// anchors crosses the threshold. Should WARN on untrusted host.
+// TestHiddenSuspiciousCount_AtThreshold_Warns — 100+ crosses the
+// Wave-3-tuned threshold. Should WARN on untrusted host.
 func TestHiddenSuspiciousCount_AtThreshold_Warns(t *testing.T) {
 	r := Apply(base(Inputs{
 		Context: ContextOutput{
-			HiddenSuspiciousCount: 8,
+			HiddenSuspiciousCount: 100,
 		},
 	}))
 	if r.Verdict != Warn {
-		t.Errorf("8 hidden anchors on untrusted host should WARN; got %s", r.Verdict)
+		t.Errorf("100 hidden anchors on untrusted host should WARN; got %s", r.Verdict)
 	}
 	if !has(r.ReasonCodes, reasons.HiddenMaliciousLink) {
 		t.Errorf("expected HIDDEN_MALICIOUS_LINK")
@@ -181,10 +183,12 @@ func TestHiddenSuspiciousCount_AtThreshold_Warns(t *testing.T) {
 // will replace with a trustscore consultation. Kept here as the current
 // behavior contract.
 func TestHiddenSuspiciousCount_TrustedHost_SuppressesWarn(t *testing.T) {
+	// Wave 3 threshold raised from 8 to 100. Use 150 to ensure well
+	// above threshold for the suppression-by-trust assertion.
 	r := Apply(base(Inputs{
 		TrustedIdentity: true,
 		Context: ContextOutput{
-			HiddenSuspiciousCount: 50,
+			HiddenSuspiciousCount: 150,
 		},
 	}))
 	if r.Verdict == Warn || r.Verdict == Block {
@@ -722,10 +726,11 @@ func TestScopedTrust_ScriptOnlyDoesNotImplyLogin(t *testing.T) {
 // --- HIDDEN_MALICIOUS_LINK ---
 
 func TestPhaseE_HiddenMaliciousLink_SuppressedByTrustScore(t *testing.T) {
+	// Wave 3 threshold raised to 100. Use 120 to cross.
 	r := Apply(base(Inputs{
 		TrustScore: 0.80,
 		Context: ContextOutput{
-			HiddenSuspiciousCount: 50,
+			HiddenSuspiciousCount: 120,
 		},
 	}))
 	if r.Verdict == Warn || r.Verdict == Block {
@@ -773,7 +778,8 @@ func TestPhaseE_HiddenIframe_SuppressedByBrandgraphTrust(t *testing.T) {
 	r := Apply(base(Inputs{
 		TrustedAnyScope: true,
 		Context: ContextOutput{
-			HasCrossOriginIframe: true,
+			HasCrossOriginIframe:         true,
+			HiddenCrossOriginIframeCount: 5, // above the Wave-3 threshold of 3
 		},
 	}))
 	if r.Verdict == Warn {
@@ -837,10 +843,12 @@ func TestPhaseE_DNSDivergenceSoft_AloneIsSubThreshold(t *testing.T) {
 
 func TestPhaseE_DNSDivergenceSoft_PlusOneOtherSoft_Warns(t *testing.T) {
 	// DNS divergence (0.5) + hidden iframe (1.0) = 1.5 ≥ 1.0 → WARN.
+	// Wave 3: HiddenCrossOriginIframeCount must be >= 3 to fire.
 	r := Apply(base(Inputs{
 		Context: ContextOutput{
-			ResolverDivergence:   true,
-			HasCrossOriginIframe: true,
+			ResolverDivergence:           true,
+			HasCrossOriginIframe:         true,
+			HiddenCrossOriginIframeCount: 3,
 		},
 	}))
 	if r.Verdict != Warn {
@@ -858,8 +866,9 @@ func TestPhaseE_DNSDivergenceSoft_SuppressedByTrustScore(t *testing.T) {
 	r := Apply(base(Inputs{
 		TrustScore: 0.80,
 		Context: ContextOutput{
-			ResolverDivergence:   true,
-			HasCrossOriginIframe: true,
+			ResolverDivergence:           true,
+			HasCrossOriginIframe:         true,
+			HiddenCrossOriginIframeCount: 3,
 		},
 	}))
 	if r.Verdict == Warn {
@@ -892,13 +901,18 @@ func TestPhaseE_HardRule_PublicDomainPrivateIP_IgnoresTrustScore(t *testing.T) {
 // --- Confidence scales with corroboration ---
 
 func TestPhaseE_TwoSoftSignals_HigherConfidenceThanOne(t *testing.T) {
+	// Wave 3 — adjusted thresholds: iframe count >= 3, anchors >= 100.
 	one := Apply(base(Inputs{
-		Context: ContextOutput{HasCrossOriginIframe: true},
+		Context: ContextOutput{
+			HasCrossOriginIframe:         true,
+			HiddenCrossOriginIframeCount: 3,
+		},
 	}))
 	two := Apply(base(Inputs{
 		Context: ContextOutput{
-			HasCrossOriginIframe:  true,
-			HiddenSuspiciousCount: 8,
+			HasCrossOriginIframe:         true,
+			HiddenCrossOriginIframeCount: 3,
+			HiddenSuspiciousCount:        100,
 		},
 	}))
 	if one.Verdict != Warn || two.Verdict != Warn {

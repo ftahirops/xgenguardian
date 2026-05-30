@@ -506,10 +506,13 @@ func buildPolicyInputs(
 		}
 
 		// HasCrossOriginIframe — hidden iframe from a different origin.
+		// HiddenCrossOriginIframeCount — count of same. Major content
+		// sites (BBC/NYT/Wikipedia) carry 1-2 analytics iframes; the
+		// Wave-3-tuned rule requires >= 3 before firing to skip those.
 		for _, f := range render.IFrames {
 			if !f.SameOrigin && !f.Visible {
 				ctx.HasCrossOriginIframe = true
-				break
+				ctx.HiddenCrossOriginIframeCount++
 			}
 		}
 
