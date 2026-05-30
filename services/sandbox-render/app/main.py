@@ -102,6 +102,12 @@ RENDER_TIMEOUT_MS = int(os.getenv("RENDER_TIMEOUT_MS", "5000"))
 # calls coming through extension or verdict-api.
 MAX_CONCURRENT_RENDERS_SYNC  = int(os.getenv("MAX_CONCURRENT_RENDERS_SYNC", "10"))
 MAX_CONCURRENT_RENDERS_ASYNC = int(os.getenv("MAX_CONCURRENT_RENDERS_ASYNC", "4"))
+
+# Wave 3 Phase 2 — cap on document.body.innerText captured per render.
+# 50 KB is enough for the phrase-scoring use case (support-scam,
+# payment-scam, crypto-drainer) without bloating the response or the
+# evidence row. Runaway pages get truncated, not failed.
+VISIBLE_TEXT_MAX_BYTES = int(os.getenv("VISIBLE_TEXT_MAX_BYTES", "51200"))
 RENDER_QUEUE_TIMEOUT_S       = float(os.getenv("RENDER_QUEUE_TIMEOUT_S", "10"))
 
 # Created in lifespan() so they're bound to the loop.
@@ -260,6 +266,14 @@ class RenderResponse(BaseModel):
     hidden_elements: list[HiddenElementFinding] = []
     suspicious_js: list[SuspiciousJSFinding] = []
     overlays: list[OverlayFinding] = []
+    # Wave 3 Phase 2 — visible page text (document.body.innerText).
+    # Capped at VISIBLE_TEXT_MAX_BYTES so a runaway page doesn't bloat
+    # the response. Consumed by internal/supportscam and internal/
+    # paymentscam (and internal/cryptodrainer when it ships). NOT
+    # sanitised — verdict-api treats this as untrusted text and never
+    # echoes it back to the user without escaping. Phase 3 will add
+    # ocr_text alongside this from screenshot OCR.
+    visible_text: str = ""
 
 
 @app.get("/healthz")
@@ -678,6 +692,21 @@ async def _do_render(req: RenderRequest) -> RenderResponse:
         html = await page.content()
         screenshot_bytes = await page.screenshot(full_page=False, type="png")
 
+        # Wave 3 Phase 2 — visible_text capture for support-scam / payment-scam /
+        # crypto-drainer scoring. document.body.innerText is what the user
+        # actually sees rendered (skips CSS-display:none + <script> + <style>).
+        # Cap at VISIBLE_TEXT_MAX_BYTES so a runaway page doesn't bloat the
+        # response. Empty string on extraction failure — scorer treats absent
+        # text as "no signal," not as "clean."
+        visible_text = ""
+        try:
+            raw = await page.evaluate(
+                "() => (document.body && document.body.innerText) || ''"
+            )
+            visible_text = (raw or "")[:VISIBLE_TEXT_MAX_BYTES]
+        except Exception:
+            visible_text = ""
+
         # Bot-protection challenge detection. Run BEFORE form/download extraction
         # because nothing else on a challenge page is meaningful.
         is_challenge, challenge_kind = detect_challenge(title, html, final_url)
@@ -902,6 +931,7 @@ async def _do_render(req: RenderRequest) -> RenderResponse:
             hidden_elements=inventory["hidden_elements"],
             suspicious_js=inventory["suspicious_js"],
             overlays=inventory["overlays"],
+            visible_text=visible_text,
         )
     finally:
         try:

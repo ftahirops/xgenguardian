@@ -238,6 +238,22 @@ type ContextOutput struct {
 	SupportScamScore        float64
 	SupportScamCategories   []string // category names that fired (best-effort, for trace)
 
+	// PaymentScamScore — Wave 3 / Phase 2. Score in [0, 1.5] from
+	// internal/paymentscam. Sources: URL + SLD + title + visible-DOM
+	// text. Hosts in brandgraph get a zero score inside the scorer.
+	// Drives Stage PS in policy.Apply: PAYMENT_SCAM_LANGUAGE +
+	// per-category reason codes when ThresholdWarn/Block/HardBlock
+	// crossed.
+	PaymentScamScore        float64
+	PaymentScamCategories   []string
+
+	// CryptoDrainerScore — Wave 3 / Phase 2. Score in [0, 1.5] from
+	// internal/cryptodrainer. Sources: URL + SLD + title + visible-DOM
+	// text + ScriptIndicators. Hosts in brandgraph get zero-score
+	// inside the scorer.
+	CryptoDrainerScore       float64
+	CryptoDrainerCategories  []string
+
 	// HomoglyphBrandMatch — true when Tier-1's homoglyphScore fired with
 	// a strong match against a brand keyword (weight >= 0.85: exact match
 	// after confusable normalization, e.g. g00gle → google, paypal-style
@@ -741,6 +757,142 @@ func Apply(in Inputs) Result {
 		r.StageOutcome["SS"] = "warn-threshold"
 		r.trace("SS", string(reasons.SupportScamLanguage), "fired",
 			"support-scam patterns → WARN", in.Context.SupportScamScore)
+	}
+
+	// --- Stage PS: payment-scam / money-fraud scorer (Wave 3 Phase 2) ---
+	//
+	// Consumes ctx.PaymentScamScore from internal/paymentscam. Same
+	// three-band shape as Stage SS:
+	//
+	//   score >= 0.80 (HardBlock) → BLOCK regardless of page class
+	//     (composite scams target everyone)
+	//   score >= 0.50 (Block)     → BLOCK on sensitive; WARN on generic
+	//   score >= 0.30 (Warn)      → WARN
+	//
+	// The scorer already short-circuits to zero on brandgraph-trusted
+	// hosts so Wikipedia / news / IRS.gov discussing these topics
+	// doesn't fire. Trust score does NOT additionally suppress here —
+	// the brandgraph escape is the only safe valve.
+	if in.Context.PaymentScamScore >= 0.80 {
+		r.Verdict = Block
+		r.Confidence = 0.92
+		r.BlockReason = "This page matches multiple payment-scam patterns " +
+			"(payment-method demand combined with refund / lottery / urgent " +
+			"pretext language). No legitimate business or agency demands gift " +
+			"cards or wire transfers."
+		r.ReasonCodes = append(r.ReasonCodes, string(reasons.PaymentScamLanguage))
+		for _, c := range paymentScamReasonCodesFor(in.Context.PaymentScamCategories) {
+			r.ReasonCodes = append(r.ReasonCodes, string(c))
+		}
+		r.StageOutcome["PS"] = "fail-hardblock"
+		r.trace("PS", string(reasons.PaymentScamLanguage), "fired",
+			"composite payment-scam pattern → BLOCK", in.Context.PaymentScamScore)
+		r.trace("G", "", "fail", "verdict=BLOCK (payment scam, ignores trust)", 0.92)
+		return r
+	}
+	if in.Context.PaymentScamScore >= 0.50 {
+		if in.PageClass.IsSensitive() {
+			r.Verdict = Block
+			r.Confidence = 0.85
+			r.BlockReason = "This page matches payment-scam patterns on a sensitive page class."
+			r.ReasonCodes = append(r.ReasonCodes, string(reasons.PaymentScamLanguage))
+			for _, c := range paymentScamReasonCodesFor(in.Context.PaymentScamCategories) {
+				r.ReasonCodes = append(r.ReasonCodes, string(c))
+			}
+			r.StageOutcome["PS"] = "fail-sensitive"
+			r.trace("PS", string(reasons.PaymentScamLanguage), "fired",
+				"payment-scam patterns on sensitive page → BLOCK", in.Context.PaymentScamScore)
+			r.trace("G", "", "fail", "verdict=BLOCK", 0.85)
+			return r
+		}
+		if r.Verdict == Allow {
+			r.Verdict = Warn
+			r.Confidence = 0.70
+		}
+		r.ReasonCodes = append(r.ReasonCodes, string(reasons.PaymentScamLanguage))
+		for _, c := range paymentScamReasonCodesFor(in.Context.PaymentScamCategories) {
+			r.ReasonCodes = append(r.ReasonCodes, string(c))
+		}
+		r.StageOutcome["PS"] = "warn-block-threshold"
+		r.trace("PS", string(reasons.PaymentScamLanguage), "fired",
+			"payment-scam patterns → WARN", in.Context.PaymentScamScore)
+	} else if in.Context.PaymentScamScore >= 0.30 {
+		if r.Verdict == Allow {
+			r.Verdict = Warn
+			r.Confidence = 0.60
+		}
+		r.ReasonCodes = append(r.ReasonCodes, string(reasons.PaymentScamLanguage))
+		for _, c := range paymentScamReasonCodesFor(in.Context.PaymentScamCategories) {
+			r.ReasonCodes = append(r.ReasonCodes, string(c))
+		}
+		r.StageOutcome["PS"] = "warn-threshold"
+		r.trace("PS", string(reasons.PaymentScamLanguage), "fired",
+			"payment-scam patterns → WARN", in.Context.PaymentScamScore)
+	}
+
+	// --- Stage CD: crypto-drainer / wallet-scam scorer (Wave 3 Phase 2) ---
+	//
+	// Consumes ctx.CryptoDrainerScore from internal/cryptodrainer.
+	// Same three-band shape as Stages SS / PS. HardBlock floor is
+	// LOWER here (0.70 vs 0.80) because a wallet-drainer signed
+	// transaction is essentially irreversible — a false-positive ALLOW
+	// can cost the user their entire wallet. The scorer's brandgraph
+	// short-circuit keeps real DeFi dApps (uniswap.org, opensea.io,
+	// metamask.io) at zero score.
+	if in.Context.CryptoDrainerScore >= 0.70 {
+		r.Verdict = Block
+		r.Confidence = 0.94
+		r.BlockReason = "This page matches multiple wallet-drainer patterns. " +
+			"Signing a transaction here can empty your wallet in one click. " +
+			"Real DeFi flows live on the project's own canonical domain."
+		r.ReasonCodes = append(r.ReasonCodes, string(reasons.CryptoDrainerPattern))
+		for _, c := range cryptoDrainerReasonCodesFor(in.Context.CryptoDrainerCategories) {
+			r.ReasonCodes = append(r.ReasonCodes, string(c))
+		}
+		r.StageOutcome["CD"] = "fail-hardblock"
+		r.trace("CD", string(reasons.CryptoDrainerPattern), "fired",
+			"composite wallet-drainer pattern → BLOCK", in.Context.CryptoDrainerScore)
+		r.trace("G", "", "fail", "verdict=BLOCK (drainer pattern, irreversible)", 0.94)
+		return r
+	}
+	if in.Context.CryptoDrainerScore >= 0.45 {
+		if in.PageClass.IsSensitive() {
+			r.Verdict = Block
+			r.Confidence = 0.88
+			r.BlockReason = "This page matches wallet-drainer patterns on a sensitive page class."
+			r.ReasonCodes = append(r.ReasonCodes, string(reasons.CryptoDrainerPattern))
+			for _, c := range cryptoDrainerReasonCodesFor(in.Context.CryptoDrainerCategories) {
+				r.ReasonCodes = append(r.ReasonCodes, string(c))
+			}
+			r.StageOutcome["CD"] = "fail-sensitive"
+			r.trace("CD", string(reasons.CryptoDrainerPattern), "fired",
+				"drainer patterns on sensitive page → BLOCK", in.Context.CryptoDrainerScore)
+			r.trace("G", "", "fail", "verdict=BLOCK", 0.88)
+			return r
+		}
+		if r.Verdict == Allow {
+			r.Verdict = Warn
+			r.Confidence = 0.72
+		}
+		r.ReasonCodes = append(r.ReasonCodes, string(reasons.CryptoDrainerPattern))
+		for _, c := range cryptoDrainerReasonCodesFor(in.Context.CryptoDrainerCategories) {
+			r.ReasonCodes = append(r.ReasonCodes, string(c))
+		}
+		r.StageOutcome["CD"] = "warn-block-threshold"
+		r.trace("CD", string(reasons.CryptoDrainerPattern), "fired",
+			"drainer patterns → WARN", in.Context.CryptoDrainerScore)
+	} else if in.Context.CryptoDrainerScore >= 0.30 {
+		if r.Verdict == Allow {
+			r.Verdict = Warn
+			r.Confidence = 0.62
+		}
+		r.ReasonCodes = append(r.ReasonCodes, string(reasons.CryptoDrainerPattern))
+		for _, c := range cryptoDrainerReasonCodesFor(in.Context.CryptoDrainerCategories) {
+			r.ReasonCodes = append(r.ReasonCodes, string(c))
+		}
+		r.StageOutcome["CD"] = "warn-threshold"
+		r.trace("CD", string(reasons.CryptoDrainerPattern), "fired",
+			"drainer patterns → WARN", in.Context.CryptoDrainerScore)
 	}
 
 	// --- Stage F.0: category-feed BLOCK + content-vs-security split ---
@@ -1850,6 +2002,64 @@ func supportScamReasonCodesFor(cats []string) []reasons.Code {
 			// Phone lure alone isn't a hard reason code; it composes
 			// with the others via SupportScamLanguage. Skip to keep
 			// the reason-code surface narrow.
+		}
+	}
+	return out
+}
+
+// paymentScamReasonCodesFor maps internal/paymentscam category names
+// to reason codes the response surfaces. One-to-one mapping; unknown
+// categories are skipped so a scorer addition without a code update
+// doesn't blow up the response.
+func paymentScamReasonCodesFor(cats []string) []reasons.Code {
+	if len(cats) == 0 {
+		return nil
+	}
+	var out []reasons.Code
+	for _, c := range cats {
+		switch c {
+		case "gift_card_scam":
+			out = append(out, reasons.GiftCardPaymentDemand)
+		case "wire_fraud":
+			out = append(out, reasons.WireFraudDemand)
+		case "tax_refund_scam":
+			out = append(out, reasons.TaxRefundScam)
+		case "fake_invoice":
+			out = append(out, reasons.FakeInvoicePhishing)
+		case "lottery_scam":
+			out = append(out, reasons.LotteryPrizeScam)
+		case "romance_scam":
+			out = append(out, reasons.RomanceScamMoneyRequest)
+		case "charity_scam":
+			out = append(out, reasons.CharityImpersonation)
+		case "gov_impersonation":
+			out = append(out, reasons.GovImpersonation)
+		}
+	}
+	return out
+}
+
+// cryptoDrainerReasonCodesFor maps internal/cryptodrainer category
+// names to reason codes. Same shape as supportscam / paymentscam.
+func cryptoDrainerReasonCodesFor(cats []string) []reasons.Code {
+	if len(cats) == 0 {
+		return nil
+	}
+	var out []reasons.Code
+	for _, c := range cats {
+		switch c {
+		case "airdrop_lure":
+			out = append(out, reasons.AirdropClaimScam)
+		case "revoke_permissions_lure":
+			out = append(out, reasons.WalletRevokeLure)
+		case "fake_mint_lure":
+			out = append(out, reasons.NFTMintScam)
+		case "wallet_connect_lure":
+			out = append(out, reasons.CryptoDrainerPattern)
+		case "drainer_wallet_method":
+			out = append(out, reasons.WalletDrainerScript)
+		case "fake_defi_brand":
+			out = append(out, reasons.FakeDeFiBrand)
 		}
 	}
 	return out

@@ -23,6 +23,8 @@ import (
 	"github.com/xgenguardian/services/verdict-api/internal/orggraph"
 	"github.com/xgenguardian/services/verdict-api/internal/pageclass"
 	"github.com/xgenguardian/services/verdict-api/internal/brandgraph"
+	"github.com/xgenguardian/services/verdict-api/internal/cryptodrainer"
+	"github.com/xgenguardian/services/verdict-api/internal/paymentscam"
 	"github.com/xgenguardian/services/verdict-api/internal/policy"
 	"github.com/xgenguardian/services/verdict-api/internal/reasons"
 	"github.com/xgenguardian/services/verdict-api/internal/supportscam"
@@ -211,15 +213,54 @@ func buildPolicyInputs(
 	// don't fire.
 	sld := pageclassExtractSLD(req.URL)
 	title := renderTitle(render)
+	var visibleText string
+	if render != nil {
+		visibleText = render.VisibleText
+	}
 	ssRes := supportscam.Score(supportscam.Inputs{
 		URL:              req.URL,
 		SLD:              sld,
 		Title:            title,
+		VisibleText:      visibleText,
 		Host:             in.Domain,
 		HostInBrandgraph: brandgraph.IsAnyTrust(in.Domain),
 	})
 	ctx.SupportScamScore = ssRes.Score
 	ctx.SupportScamCategories = supportScamCategoryNames(ssRes)
+
+	// Payment-scam scorer (Wave 3 Phase 2). Same inputs as support-scam.
+	psRes := paymentscam.Score(paymentscam.Inputs{
+		URL:              req.URL,
+		SLD:              sld,
+		Title:            title,
+		VisibleText:      visibleText,
+		Host:             in.Domain,
+		HostInBrandgraph: brandgraph.IsAnyTrust(in.Domain),
+	})
+	ctx.PaymentScamScore = psRes.Score
+	ctx.PaymentScamCategories = paymentScamCategoryNames(psRes)
+
+	// Crypto-drainer scorer (Wave 3 Phase 2). Adds ScriptIndicators
+	// from sandbox-render's suspicious_js findings so EIP-1193 method
+	// signatures (eth_signTypedData_v4, setApprovalForAll, etc.) on
+	// untrusted hosts contribute.
+	var scriptIndicators []string
+	if render != nil {
+		for _, s := range render.SuspiciousJS {
+			scriptIndicators = append(scriptIndicators, s.Indicator)
+		}
+	}
+	cdRes := cryptodrainer.Score(cryptodrainer.Inputs{
+		URL:              req.URL,
+		SLD:              sld,
+		Title:            title,
+		VisibleText:      visibleText,
+		Host:             in.Domain,
+		HostInBrandgraph: brandgraph.IsAnyTrust(in.Domain),
+		ScriptIndicators: scriptIndicators,
+	})
+	ctx.CryptoDrainerScore = cdRes.Score
+	ctx.CryptoDrainerCategories = cryptoDrainerCategoryNames(cdRes)
 	// Domain age (from RDAP). in.DomainAge is time.Duration; 0 means unknown
 	// (RDAP lookup failed, no registration date in response, or RDAP not
 	// configured). DomainAgeKnown lets the policy distinguish "we know it's
@@ -737,6 +778,36 @@ func pageclassExtractSLD(rawurl string) string {
 // Used by policy.Apply to emit one reason code per category.
 func supportScamCategoryNames(r supportscam.Result) []string {
 	seen := map[supportscam.Category]struct{}{}
+	out := make([]string, 0, len(r.Hits))
+	for _, h := range r.Hits {
+		if _, dup := seen[h.Category]; dup {
+			continue
+		}
+		seen[h.Category] = struct{}{}
+		out = append(out, string(h.Category))
+	}
+	return out
+}
+
+// paymentScamCategoryNames returns unique category names from a
+// paymentscam.Result, in the order produced by the scorer.
+func paymentScamCategoryNames(r paymentscam.Result) []string {
+	seen := map[paymentscam.Category]struct{}{}
+	out := make([]string, 0, len(r.Hits))
+	for _, h := range r.Hits {
+		if _, dup := seen[h.Category]; dup {
+			continue
+		}
+		seen[h.Category] = struct{}{}
+		out = append(out, string(h.Category))
+	}
+	return out
+}
+
+// cryptoDrainerCategoryNames returns unique category names from a
+// cryptodrainer.Result, in the order produced by the scorer.
+func cryptoDrainerCategoryNames(r cryptodrainer.Result) []string {
+	seen := map[cryptodrainer.Category]struct{}{}
 	out := make([]string, 0, len(r.Hits))
 	for _, h := range r.Hits {
 		if _, dup := seen[h.Category]; dup {

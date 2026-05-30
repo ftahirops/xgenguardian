@@ -786,6 +786,12 @@ type overlayFinding struct {
 }
 
 type renderResponse struct {
+	// VisibleText — Wave 3 Phase 2. document.body.innerText from the
+	// rendered page, capped server-side at 50 KB. Consumed by
+	// internal/supportscam and internal/paymentscam (and
+	// internal/cryptodrainer when it ships) for phrase scoring. Empty
+	// when sandbox-render is older or extraction failed.
+	VisibleText      string            `json:"visible_text,omitempty"`
 	EvidenceID       string            `json:"evidence_id"`
 	ScreenshotURL    string            `json:"screenshot_url"`
 	DOMURL           string            `json:"dom_url"`

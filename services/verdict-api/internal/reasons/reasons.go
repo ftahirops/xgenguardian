@@ -151,6 +151,29 @@ const (
 	GiftCardPaymentDemand         Code = "GIFT_CARD_PAYMENT_DEMAND"
 	FakeTechSupportBrand          Code = "FAKE_TECH_SUPPORT_BRAND"
 	GovImpersonation              Code = "GOV_IMPERSONATION"
+
+	// Payment-scam scorer (Wave 3 Phase 2). Emitted by
+	// internal/paymentscam when per-category score crosses
+	// ThresholdWarn/Block/HardBlock. Sources: URL + SLD + title +
+	// visible-DOM text from sandbox-render.
+	PaymentScamLanguage           Code = "PAYMENT_SCAM_LANGUAGE"
+	WireFraudDemand               Code = "WIRE_FRAUD_DEMAND"
+	TaxRefundScam                 Code = "TAX_REFUND_SCAM"
+	FakeInvoicePhishing           Code = "FAKE_INVOICE_PHISHING"
+	LotteryPrizeScam              Code = "LOTTERY_PRIZE_SCAM"
+	RomanceScamMoneyRequest       Code = "ROMANCE_SCAM_MONEY_REQUEST"
+	CharityImpersonation          Code = "CHARITY_IMPERSONATION"
+
+	// Crypto-drainer / wallet-scam scorer (Wave 3 Phase 2). Emitted by
+	// internal/cryptodrainer when per-category score crosses
+	// ThresholdWarn/Block/HardBlock. Sources today: URL + SLD + title +
+	// visible-DOM text + script indicators from sandbox-render.
+	CryptoDrainerPattern          Code = "CRYPTO_DRAINER_PATTERN"
+	WalletDrainerScript           Code = "WALLET_DRAINER_SCRIPT"
+	AirdropClaimScam              Code = "AIRDROP_CLAIM_SCAM"
+	NFTMintScam                   Code = "NFT_MINT_SCAM"
+	WalletRevokeLure              Code = "WALLET_REVOKE_LURE"
+	FakeDeFiBrand                 Code = "FAKE_DEFI_BRAND"
 )
 
 // Template is the human-readable form rendered in interstitials and the portal.
@@ -543,6 +566,71 @@ var templates = map[Code]Template{
 	GovImpersonation: {
 		Title:    "Impersonates a government agency",
 		Body:     "The page references the IRS / SSA / Medicare / HMRC / similar government agency in a context consistent with a scam (refund claim, arrest warrant, unpaid taxes). Government agencies do not contact citizens by random webpage popup.",
+		Severity: SeverityHigh,
+	},
+	PaymentScamLanguage: {
+		Title:    "Payment-scam patterns detected",
+		Body:     "This page combines payment-method demands (gift card / wire transfer / cryptocurrency) with scam-pretext language (refund / lottery / urgent payment / fake invoice). The combination is scam-by-construction; no legitimate business or agency demands payment this way.",
+		Severity: SeverityHigh,
+	},
+	WireFraudDemand: {
+		Title:    "Wire-transfer or money-app fraud",
+		Body:     "The page demands payment via Western Union, MoneyGram, Cash App, Zelle, or other irreversible money transfer. FTC/FBI: legitimate businesses and government agencies do not request these payment methods. This is a scam-only pattern.",
+		Severity: SeverityCritical,
+	},
+	TaxRefundScam: {
+		Title:    "IRS / tax-refund scam",
+		Body:     "The page claims you have an unclaimed tax refund and pressures you to provide bank details or pay a \"processing fee.\" The IRS never initiates contact about refunds via webpage or unsolicited email and never asks for bank details or payment via gift card.",
+		Severity: SeverityHigh,
+	},
+	FakeInvoicePhishing: {
+		Title:    "Fake-invoice phishing",
+		Body:     "The page claims an unpaid subscription / renewal invoice for a brand you may recognize (Geek Squad, Norton, McAfee, PayPal). Legitimate invoices arrive in your account, not via random webpages.",
+		Severity: SeverityHigh,
+	},
+	LotteryPrizeScam: {
+		Title:    "Lottery / sweepstakes / inheritance scam",
+		Body:     "The page claims you've won a prize, lottery, or inheritance. Legitimate lotteries and inheritances never contact \"winners\" out of the blue and never require an advance fee.",
+		Severity: SeverityHigh,
+	},
+	RomanceScamMoneyRequest: {
+		Title:    "Romance-scam money request",
+		Body:     "The page or message asks for money for a stuck-in-customs / emergency-surgery / travel-emergency situation. FBI: romance-scam money requests follow the same scripts; never send money to someone you've only met online.",
+		Severity: SeverityHigh,
+	},
+	CharityImpersonation: {
+		Title:    "Charity-impersonation scam",
+		Body:     "The page solicits donations for disaster relief or emergency causes but the host is not the official charity domain. Verify the charity at charitywatch.org or charitynavigator.org before donating.",
+		Severity: SeverityHigh,
+	},
+	CryptoDrainerPattern: {
+		Title:    "Wallet-drainer pattern detected",
+		Body:     "This page combines wallet-drainer lure patterns: airdrop / mint / wallet-verify pretext + DeFi brand impersonation + a request to connect your wallet. Drainers trick you into signing a single transaction that empties your wallet.",
+		Severity: SeverityCritical,
+	},
+	WalletDrainerScript: {
+		Title:    "Suspicious wallet-method request",
+		Body:     "The page contains JavaScript that requests dangerous EIP-1193 wallet methods (eth_signTypedData_v4 / setApprovalForAll / wallet_addEthereumChain) on a host not in the curated dApp registry. Real dApps use these methods on their own canonical domains.",
+		Severity: SeverityCritical,
+	},
+	AirdropClaimScam: {
+		Title:    "Fake airdrop claim",
+		Body:     "The page offers an unclaimed crypto airdrop or token-claim flow. Real airdrops are claimed via the project's official UI on its canonical domain — never via a random search-result or social-DM link.",
+		Severity: SeverityHigh,
+	},
+	NFTMintScam: {
+		Title:    "Fake NFT mint",
+		Body:     "The page advertises a free or limited mint on a host that is not the official project domain. Mint flows on non-canonical hosts are wallet drainers — signing the transaction sends approvals to the attacker, not the project.",
+		Severity: SeverityHigh,
+	},
+	WalletRevokeLure: {
+		Title:    "Fake wallet-permissions cleanup",
+		Body:     "The page offers to revoke token approvals or clean up wallet permissions. The legitimate tool is revoke.cash — verify the address bar shows that exact host before connecting.",
+		Severity: SeverityHigh,
+	},
+	FakeDeFiBrand: {
+		Title:    "Impersonates a DeFi or wallet brand",
+		Body:     "The page references MetaMask / Uniswap / OpenSea / similar DeFi brand, but the hosting domain is not the brand's canonical domain. Real DeFi flows live on the project's own host.",
 		Severity: SeverityHigh,
 	},
 	OverlayClickjack: {
