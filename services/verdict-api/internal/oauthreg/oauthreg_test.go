@@ -105,3 +105,83 @@ func TestAnySensitiveScope(t *testing.T) {
 		}
 	}
 }
+
+// Wave 3 expansion — extended scope coverage for GitHub / Slack /
+// Atlassian / Azure. Smoke corpus surfaced the OAUTH_UNKNOWN_CLIENT_ID
+// rule not firing on github.com/login/oauth/authorize with scope=repo,
+// because `repo` wasn't in the original sensitive-scope list (only
+// Microsoft Graph + Google were).
+
+func TestAnySensitiveScope_GitHub(t *testing.T) {
+	cases := []struct {
+		scopes []string
+		want   bool
+	}{
+		{[]string{"repo"}, true},
+		{[]string{"repo:status"}, true},
+		{[]string{"admin:org"}, true},
+		{[]string{"admin:repo_hook"}, true},
+		{[]string{"admin:enterprise"}, true},
+		{[]string{"gist"}, true},
+		{[]string{"delete_repo"}, true},
+		{[]string{"workflow"}, true},
+		{[]string{"write:packages"}, true},
+		{[]string{"notifications"}, true},
+		// Negative: read-only scopes that don't grant write
+		{[]string{"read:org"}, false},
+		{[]string{"read:user"}, false},
+		{[]string{"read:public_key"}, false},
+		{[]string{"user"}, false}, // matches existing TestAnySensitiveScope contract
+	}
+	for _, c := range cases {
+		if got := anySensitiveScope(c.scopes); got != c.want {
+			t.Errorf("anySensitiveScope(%v) = %v; want %v", c.scopes, got, c.want)
+		}
+	}
+}
+
+func TestAnySensitiveScope_Slack(t *testing.T) {
+	cases := []struct {
+		scopes []string
+		want   bool
+	}{
+		{[]string{"chat:write"}, true},
+		{[]string{"channels:history"}, true},
+		{[]string{"groups:history"}, true},
+		{[]string{"files:read"}, true},
+		{[]string{"users.profile:write"}, true},
+		// Negative
+		{[]string{"identify"}, false},
+		{[]string{"users:read"}, false},
+	}
+	for _, c := range cases {
+		if got := anySensitiveScope(c.scopes); got != c.want {
+			t.Errorf("anySensitiveScope(%v) = %v; want %v", c.scopes, got, c.want)
+		}
+	}
+}
+
+func TestAnySensitiveScope_GoogleExtended(t *testing.T) {
+	cases := []struct {
+		scopes []string
+		want   bool
+	}{
+		{[]string{"https://www.googleapis.com/auth/gmail.compose"}, true},
+		{[]string{"https://www.googleapis.com/auth/gmail.readonly"}, true},
+		{[]string{"https://www.googleapis.com/auth/spreadsheets"}, true},
+		{[]string{"https://www.googleapis.com/auth/cloud-platform"}, true},
+		// Negative
+		{[]string{"https://www.googleapis.com/auth/userinfo.email"}, false},
+	}
+	for _, c := range cases {
+		if got := anySensitiveScope(c.scopes); got != c.want {
+			t.Errorf("anySensitiveScope(%v) = %v; want %v", c.scopes, got, c.want)
+		}
+	}
+}
+
+func TestAnySensitiveScope_Azure(t *testing.T) {
+	if !anySensitiveScope([]string{"https://management.azure.com/.default"}) {
+		t.Error("Azure management.azure.com should be sensitive")
+	}
+}

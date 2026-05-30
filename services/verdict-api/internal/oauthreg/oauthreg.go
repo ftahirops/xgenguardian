@@ -190,18 +190,60 @@ func anySensitiveScope(scopes []string) bool {
 	for _, s := range scopes {
 		lc := strings.ToLower(s)
 		switch {
+		// --- Microsoft Graph ---
 		case strings.Contains(lc, "mail.readwrite"),
 			strings.Contains(lc, "mail.send"),
 			strings.Contains(lc, "files.readwrite"),
 			strings.Contains(lc, "sites.readwrite"),
 			strings.Contains(lc, "directory.readwrite"),
 			strings.Contains(lc, "user.readwrite.all"),
+			strings.Contains(lc, "files.read.all"),
+			strings.Contains(lc, "mail.read"),
+			strings.Contains(lc, "chat.read"),
+			strings.Contains(lc, "chat.readwrite"),
+			strings.Contains(lc, "team.readwrite"),
+		// --- Google ---
 			strings.Contains(lc, "gmail.modify"),
 			strings.Contains(lc, "gmail.send"),
+			strings.Contains(lc, "gmail.compose"),
+			strings.Contains(lc, "gmail.readonly"),
 			strings.Contains(lc, "drive.file"),
 			strings.Contains(lc, "drive"),
 			strings.Contains(lc, "calendar"),
-			strings.Contains(lc, "contacts"):
+			strings.Contains(lc, "contacts"),
+			strings.Contains(lc, "spreadsheets"),
+			strings.Contains(lc, "cloud-platform"),
+		// --- GitHub (Wave 3 corpus driven) ---
+		// repo            full repo read/write — credential exfil-tier
+		// admin:org       org-level admin (membership, repos, teams)
+		// admin:repo_hook web-hook management — code injection vector
+		// admin:enterprise/admin:gpg_key/admin:public_key
+		// gist            full gist read/write
+		// delete_repo     irreversible
+		// notifications   email-style abuse
+			lc == "repo",
+			strings.HasPrefix(lc, "repo:"),
+			strings.HasPrefix(lc, "admin:"),
+			lc == "gist",
+			lc == "delete_repo",
+			lc == "notifications",
+			strings.HasPrefix(lc, "write:"),
+			strings.HasPrefix(lc, "workflow"),
+		// --- Slack ---
+			strings.Contains(lc, "chat:write"),
+			strings.Contains(lc, "channels:history"),
+			strings.Contains(lc, "groups:history"),
+			strings.Contains(lc, "im:history"),
+			strings.Contains(lc, "files:read"),
+			strings.Contains(lc, "users.profile:write"),
+		// --- Atlassian ---
+			strings.Contains(lc, "write:jira-work"),
+			strings.Contains(lc, "manage:jira-project"),
+			strings.Contains(lc, "manage:jira-configuration"),
+			strings.Contains(lc, "write:confluence-content"),
+		// --- AWS / Azure / GCP (high-risk service scopes) ---
+			strings.Contains(lc, "management.azure.com"),
+			strings.Contains(lc, "analysis.windows.net"):
 			return true
 		}
 	}
