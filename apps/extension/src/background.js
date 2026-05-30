@@ -1054,6 +1054,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ ok: true });
     return false;
   }
+  // v0.3.6 — Surface Shield. Content script on a trusted-surface host
+  // (chat.openai.com, claude.ai, gmail.com, slack.com, etc.) found a
+  // rendered link/image/iframe pointing at a third-party URL and is
+  // asking us to vet it BEFORE the user clicks. Same endpoint, same
+  // verdict shape — the engine doesn't know this is a different
+  // sensor. Async response.
+  if (msg?.kind === "surface_vet") {
+    if (!isHttpURL(msg.url)) {
+      sendResponse({ verdict: null });
+      return false;
+    }
+    (async () => {
+      try {
+        const verdict = await fetchVerdictForSurfaceShield(msg.url, sender?.tab?.url || "");
+        sendResponse({ verdict });
+      } catch {
+        sendResponse({ verdict: null });
+      }
+    })();
+    return true; // async response
+  }
   // v0.3.3 Phase G — user clicked "Proceed anyway" on the WARN page.
   if (msg?.kind === "warn_overridden") {
     if (isHttpURL(msg.url)) {
@@ -1267,3 +1288,53 @@ chrome.alarms.onAlarm.addListener(async (a) => {
   if (a.name !== "policy-refresh") return;
   // Phase 2: pull dynamic declarativeNetRequest rules.
 });
+
+// ---------- v0.3.6 — Surface Shield helper ----------
+
+// fetchVerdictForSurfaceShield asks /v1/check about a URL on behalf
+// of a content script running on a trusted-surface host. Identical
+// shape to the webNavigation hook's call — the engine can't tell
+// the requests apart, which is the whole point.
+//
+// Returns a slim verdict object so content scripts don't need to
+// understand the full response shape:
+//   { verdict, reason_codes, block_reason }
+//
+// Returns null on any error. Surface Shield treats null as ALLOW
+// (don't badge) — failing closed here would render warning chips on
+// every link during a transient API hiccup. Fail open: only known-
+// bad URLs get badged.
+async function fetchVerdictForSurfaceShield(url, contextURL) {
+  const cfg = await settings();
+  const apiBase = validateAPIBase(cfg.apiBase);
+  if (!apiBase) return null;
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 8000);
+    const r = await fetch(`${apiBase}/v1/check`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      // OpenerURL passes the trusted-surface host so the engine can
+      // see "this URL is being rendered INSIDE ChatGPT" as context
+      // (today the field is informational; future policy rules may
+      // act on it).
+      body: JSON.stringify({
+        url,
+        opener_url: contextURL || "",
+        client_id: cfg.clientId || "",
+      }),
+      signal: ctrl.signal,
+      cache: "no-store",
+    });
+    clearTimeout(t);
+    if (!r.ok) return null;
+    const j = await r.json();
+    return {
+      verdict: j.verdict,
+      reason_codes: j.reason_codes || [],
+      block_reason: j.block_reason || "",
+    };
+  } catch {
+    return null;
+  }
+}

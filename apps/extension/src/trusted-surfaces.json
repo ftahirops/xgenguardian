@@ -1,0 +1,27 @@
+{
+  "_comment": "Trusted-surface registry for the Surface Shield (v0.3.6).\n\nEach entry names a host whose UI surfaces THIRD-PARTY CONTENT as first-class clickable/visual elements inside its own trusted chrome. The Surface Shield content script attaches to the configured container, watches new DOM nodes, and pre-vets every <a>, <img>, <iframe> via /v1/check BEFORE the user interacts.\n\nAdd a new surface by appending a row with:\n  host:     bare host (no scheme). Matches via location.hostname.\n  selector: CSS selector for the container that holds rendered third-party content. The shield observes mutations INSIDE this container only — we don't scan the host's own navigation.\n  name:     short human label for the badge tooltip.\n\nZero server changes when adding a surface — the shield reuses /v1/check verbatim.",
+
+  "surfaces": [
+    { "host": "chat.openai.com",   "selector": "[data-message-author-role=\"assistant\"]",   "name": "ChatGPT" },
+    { "host": "chatgpt.com",       "selector": "[data-message-author-role=\"assistant\"]",   "name": "ChatGPT" },
+    { "host": "claude.ai",         "selector": ".font-claude-message, .prose",               "name": "Claude" },
+    { "host": "gemini.google.com", "selector": "model-response, .markdown",                  "name": "Gemini" },
+    { "host": "www.perplexity.ai", "selector": ".prose, [data-testid=\"answer\"]",           "name": "Perplexity" },
+    { "host": "copilot.microsoft.com", "selector": ".ac-textBlock, [class*=\"response\"]",   "name": "Copilot" },
+
+    { "host": "mail.google.com",   "selector": ".adn .a3s, .ii.gt",                          "name": "Gmail" },
+    { "host": "outlook.live.com",  "selector": ".ReadMsgBody, [role=\"document\"]",          "name": "Outlook" },
+    { "host": "outlook.office.com","selector": ".ReadMsgBody, [role=\"document\"]",          "name": "Outlook" },
+    { "host": "outlook.office365.com","selector": ".ReadMsgBody, [role=\"document\"]",       "name": "Outlook" },
+
+    { "host": "app.slack.com",     "selector": ".c-message__body, .p-rich_text_section",     "name": "Slack" },
+    { "host": "discord.com",       "selector": "[id^=\"message-content-\"]",                 "name": "Discord" },
+    { "host": "teams.microsoft.com","selector": ".ts-message-content, [class*=\"messageContent\"]", "name": "Teams" },
+
+    { "host": "www.notion.so",     "selector": ".notion-page-content",                       "name": "Notion" },
+    { "host": "notion.so",         "selector": ".notion-page-content",                       "name": "Notion" },
+
+    { "host": "github.com",        "selector": ".markdown-body",                             "name": "GitHub" },
+    { "host": "gitlab.com",        "selector": ".md, .description",                          "name": "GitLab" }
+  ]
+}
