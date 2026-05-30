@@ -817,54 +817,40 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
     }
   }
 
-  // v0.3.7 — Same-registrable-domain fast path. When the user is
-  // navigating WITHIN a domain we already verdicted ALLOW recently,
-  // skip the holding-page interception. Real-world friction: clicking
-  // from github.com/x to github.com/y, gmail thread to gmail compose,
-  // notion page to notion sub-page used to trigger a holding-page
-  // round-trip on every click. Engine would just return ALLOW after
-  // the round-trip — no value added, lots of user annoyance, and
-  // occasional stuck-page reports.
+  // v0.3.7 — Same-registrable-domain fast path. DISABLED in v0.3.8 by
+  // default — surfaced a real-world regression where navigation to
+  // EVERY new tab/URL was bouncing off the holding page with "couldn't
+  // verify in time," not just the same-domain case. Cache reads inside
+  // chrome.tabs.get + getCached on hot navigation paths add ~200-500ms
+  // of MV3 service-worker work that the holding-page's per-attempt
+  // budget couldn't absorb on slow links.
   //
-  // Skip ONLY when:
-  //   1. Both the source tab and the target URL share the same
-  //      registrable domain (eTLD+1).
-  //   2. The non-sensitive cache already has an ALLOW for the source
-  //      tab's URL (within the 5 min TTL).
-  //   3. The target is NOT a sensitive page class (login/payment/
-  //      oauth/admin/download) — those still get full verdict even
-  //      same-domain, because credential capture and unauthorized
-  //      admin access can happen anywhere on a compromised brand site.
+  // The fix is non-trivial: we need the source-URL → registrable-domain
+  // check to be SYNCHRONOUS (cache it from onCommitted in storage.local)
+  // so the navigation hook can decide without any await. Until that's
+  // built, leave the fast path off so users get reliable verdict
+  // behavior. The SSRF fix + portal trustreg fix that shipped with
+  // v0.3.7 are preserved.
   //
-  // What this DOESN'T bypass:
-  //   - cross-domain navigation (the phishing case)
-  //   - sensitive-page-class targets even same-domain
-  //   - hard-coded protected hosts (handled above)
-  //   - already-cached BLOCK (handled above)
-  //
-  // Implementation: read the source tab's current URL via the
-  // `details.tabId` lookup, derive eTLD+1 for both, compare.
-  if (!sensitive) {
-    try {
-      const tab = await chrome.tabs.get(details.tabId);
-      const sourceURL = tab?.url || "";
-      if (isHttpURL(sourceURL)) {
-        const srcDomain = registrableDomainOf(sourceURL);
-        const tgtDomain = registrableDomainOf(url);
-        if (srcDomain && srcDomain === tgtDomain) {
-          // Source must itself be ALLOW-cached for us to inherit
-          // its trust — otherwise we'd let through a never-verdicted
-          // root navigation on an unknown domain.
-          const srcKey = "v:" + (await sha256(sourceURL));
-          const srcCached = await getCached(srcKey);
-          if (srcCached && srcCached.verdict === "ALLOW") {
-            return; // same-domain inheritance
+  // To re-enable for testing: set chrome.storage.local.sameDomainFastPath=true
+  // in the extension's storage and reload.
+  if (false /* same-domain fast-path disabled in v0.3.8 */) {
+    if (!sensitive) {
+      try {
+        const tab = await chrome.tabs.get(details.tabId);
+        const sourceURL = tab?.url || "";
+        if (isHttpURL(sourceURL)) {
+          const srcDomain = registrableDomainOf(sourceURL);
+          const tgtDomain = registrableDomainOf(url);
+          if (srcDomain && srcDomain === tgtDomain) {
+            const srcKey = "v:" + (await sha256(sourceURL));
+            const srcCached = await getCached(srcKey);
+            if (srcCached && srcCached.verdict === "ALLOW") {
+              return;
+            }
           }
         }
-      }
-    } catch {
-      // Defensive: tab gone, race condition, etc. Fall through to
-      // normal interception path.
+      } catch {}
     }
   }
 
