@@ -136,11 +136,9 @@ func TestFromURL_SLDKeywords_PromoteToSensitive(t *testing.T) {
 		want Class
 	}{
 		{"https://bank-login-secure-2026.example/", Login},
-		// paypal-account-security.example is a separate pre-existing
-		// path-switch bug: the URL contains "/pay" as a substring of
-		// "/paypal-..." because of the slash-after-scheme. Path-switch
-		// fires before SLD-switch, so this case classifies as Payment
-		// not Login. Out of scope for QW2 — leave it un-asserted.
+		// paypal-account-security.example now correctly maps to Login
+		// (path-switch substring bug fixed; SLD branch matches "account").
+		{"https://paypal-account-security.example/", Login},
 		{"https://wellsfargo-online-update.example/", Login},
 		{"https://chase-account-verify.example/", Login},
 		{"https://login.microsoft.com.evil.example/", Login}, // "login" in left label
@@ -183,6 +181,69 @@ func TestExtractSLD(t *testing.T) {
 		}
 		if got != c.want {
 			t.Errorf("extractSLD(%q) = %q; want %q", c.url, got, c.want)
+		}
+	}
+}
+
+// Wave 2.5 — path-switch substring-matching bug regression.
+//
+// Pre-fix the path switch used strings.Contains on the LOWERCASED FULL
+// URL, so the host substring's leading slash (the "/" after "//") could
+// fake a path-keyword match. Two real false-positive classes:
+//
+//   1. paypal-account-security.example → Payment (matched "/pay" in
+//      "/paypal-...")
+//   2. login.example → Login (matched "/login" in "//login.example/")
+//
+// Post-fix the switch reads u.Path only, so these stop misfiring and
+// the SLD-keyword fallback gets to decide instead.
+
+func TestFromURL_PathSubstringBug_PaypalNotPayment(t *testing.T) {
+	cases := []struct {
+		url  string
+		want Class
+	}{
+		// The headline case: paypal-* SLD must NOT map to Payment via
+		// the path switch. After the fix, no path match → SLD-keyword
+		// switch fires on "account" → Login.
+		{"https://paypal-account-security.example/", Login},
+		// Same class: any SLD containing "pay" was previously broken
+		{"https://paypal-login.example/", Login},
+	}
+	for _, c := range cases {
+		got := FromURL(c.url)
+		if got != c.want {
+			t.Errorf("FromURL(%q) = %s; want %s (path-substring regression)", c.url, got, c.want)
+		}
+	}
+}
+
+func TestFromURL_PathSubstringBug_HostKeywordNotPath(t *testing.T) {
+	// host-only keyword must not trigger path-switch. With the fix:
+	//   login.example/                → path is "/" → no path match →
+	//                                   SLD has "login" → Login (from
+	//                                   the SLD-keyword fallback)
+	//   pay.example/about             → path is "/about" → no path match →
+	//                                   SLD has no keyword → Generic
+	cases := []struct {
+		url  string
+		want Class
+	}{
+		// SLD keyword "login" still maps to Login but via the SLD branch
+		{"https://login.example/", Login},
+		// SLD keyword "pay" alone doesn't trigger our SLD switch
+		// (we require "-pay-" or "pay-" prefix or "-pay" suffix), so a
+		// bare "pay.example" should be Generic.
+		{"https://pay.example/about", Generic},
+		// /payment in actual path still fires
+		{"https://example.com/payment", Payment},
+		// /oauth in actual path still fires
+		{"https://example.com/api/oauth/v2/authorize", OAuthConsent},
+	}
+	for _, c := range cases {
+		got := FromURL(c.url)
+		if got != c.want {
+			t.Errorf("FromURL(%q) = %s; want %s", c.url, got, c.want)
 		}
 	}
 }

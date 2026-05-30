@@ -122,32 +122,55 @@ func LooksLikeDevToolInstallLure(rawurl string) bool {
 // FromURL — Stage A.1: cheap URL-only classification. Used in Tier-1 to
 // decide whether to force Tier-2 for sensitive pages.
 //
-// Order matters: more specific patterns first so e.g. "oauth/consent" beats
-// the generic "/login" match.
+// Path-keyword checks operate on the URL's PATH ONLY, not the full URL
+// string. Pre-Wave-2.5 the path switch used strings.Contains on the
+// lowercased full URL, which produced two real false-positive classes:
+//
+//   1. Host-substring drift: https://paypal-account-security.example/
+//      matched "/pay" because the host substring "/paypal-..." (with
+//      the slash from "//paypal-...") contains "/pay" as a substring.
+//      Smoke corpus caught this; it misclassified one phishing host
+//      as Payment instead of letting the SLD-keyword branch fire.
+//
+//   2. //host-prefix drift: https://login.example/ matched "/login"
+//      because the URL substring "//login.example/" contains "/login".
+//      Any SLD that happens to be one of these keywords got promoted.
+//
+// Both vanish once we parse the URL and check u.Path only. Ordering is
+// preserved (oauth > mfa > password > login > payment > crypto >
+// invoice) so e.g. "/oauth/consent" still beats "/login" alone.
 func FromURL(rawurl string) Class {
-	l := strings.ToLower(rawurl)
+	u, err := url.Parse(rawurl)
+	// pathOnly is what the keyword switch reads. On parse failure we
+	// fall back to scanning the full URL, which preserves prior
+	// behaviour on garbage input (better something than nothing).
+	pathOnly := ""
+	if err == nil && u != nil {
+		pathOnly = strings.ToLower(u.Path)
+	}
+	if pathOnly == "" {
+		pathOnly = strings.ToLower(rawurl)
+	}
+	// containsPath helper — strings.Contains over pathOnly. Kept inline
+	// to keep the change diff focused.
+	cp := func(needle string) bool { return strings.Contains(pathOnly, needle) }
 	switch {
-	case strings.Contains(l, "/oauth"), strings.Contains(l, "/authorize"),
-		strings.Contains(l, "/consent"), strings.Contains(l, "/adminconsent"):
+	case cp("/oauth"), cp("/authorize"), cp("/consent"), cp("/adminconsent"):
 		return OAuthConsent
-	case strings.Contains(l, "/mfa"), strings.Contains(l, "/2fa"),
-		strings.Contains(l, "/otp"), strings.Contains(l, "/totp"),
-		strings.Contains(l, "/passkey"), strings.Contains(l, "/webauthn"):
+	case cp("/mfa"), cp("/2fa"), cp("/otp"), cp("/totp"),
+		cp("/passkey"), cp("/webauthn"):
 		return MFA
-	case strings.Contains(l, "/password"), strings.Contains(l, "/pwd"):
+	case cp("/password"), cp("/pwd"):
 		return PasswordStep
-	case strings.Contains(l, "/login"), strings.Contains(l, "/signin"),
-		strings.Contains(l, "/sign-in"), strings.Contains(l, "/log-in"),
-		strings.Contains(l, "/verify"), strings.Contains(l, "/recover"),
-		strings.Contains(l, "/reset"):
+	case cp("/login"), cp("/signin"), cp("/sign-in"), cp("/log-in"),
+		cp("/verify"), cp("/recover"), cp("/reset"):
 		return Login
-	case strings.Contains(l, "/payment"), strings.Contains(l, "/pay"),
-		strings.Contains(l, "/checkout"), strings.Contains(l, "/billing"),
-		strings.Contains(l, "/wallet"):
+	case cp("/payment"), cp("/pay"), cp("/checkout"),
+		cp("/billing"), cp("/wallet"):
 		return Payment
-	case strings.Contains(l, "/withdraw"), strings.Contains(l, "/crypto"):
+	case cp("/withdraw"), cp("/crypto"):
 		return CryptoWithdrawal
-	case strings.Contains(l, "/invoice"):
+	case cp("/invoice"):
 		return Invoice
 	}
 	// Dev-tool install lure check goes BEFORE the bare /download fallback
@@ -157,7 +180,7 @@ func FromURL(rawurl string) Class {
 	if LooksLikeDevToolInstallLure(rawurl) {
 		return DeveloperToolInstallLure
 	}
-	if strings.Contains(l, "/download") {
+	if strings.Contains(pathOnly, "/download") {
 		return Download
 	}
 	// Wave 2.5 — SLD-keyword fallback. URLs like
