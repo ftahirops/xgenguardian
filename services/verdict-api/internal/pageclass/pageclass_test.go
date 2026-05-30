@@ -247,3 +247,41 @@ func TestFromURL_PathSubstringBug_HostKeywordNotPath(t *testing.T) {
 		}
 	}
 }
+
+// Wave 2.5 — LooksLikeDevToolInstallLure expansion. The failing smoke
+// case (fake-nodejs-install) slipped through pre-expansion because
+// "nodejs" wasn't in devToolBrandKeywords. Two fixes:
+//   1. Expand the brand list to cover language runtimes / package
+//      managers / container + infra tooling / editors / dev infra.
+//   2. Structural fallback: an SLD containing "install" combined with
+//      a path hint matches even without a brand in the keyword list.
+
+func TestLooksLikeDevToolInstallLure_RuntimeBrand(t *testing.T) {
+	cases := []struct {
+		url  string
+		want bool
+	}{
+		// Pre-fix failing case
+		{"https://nodejs-install-quick.example/installer", true},
+		// Other ecosystems we now cover
+		{"https://python-install-site.example/setup", true},
+		{"https://rustup-install.example/install", true},
+		{"https://golang-install.example/download", true},
+		{"https://docker-install.example/setup", true},
+		{"https://kubernetes-cli-install.example/docs", true},
+		{"https://hashicorp-installer.example/download", true},
+		// Structural-only (no brand in keyword list — covered by SLD branch)
+		{"https://one-click-installer.example/download", true},
+		{"https://secure-install-page.example/setup", true},
+		// Negative: ordinary site, no install hint or SLD
+		{"https://example.com/about", false},
+		{"https://example.com/install", false},        // install path but no brand AND no install in SLD
+		{"https://anthropic.com/news/release", false}, // brand but no path hint
+	}
+	for _, c := range cases {
+		got := LooksLikeDevToolInstallLure(c.url)
+		if got != c.want {
+			t.Errorf("LooksLikeDevToolInstallLure(%q) = %v; want %v", c.url, got, c.want)
+		}
+	}
+}

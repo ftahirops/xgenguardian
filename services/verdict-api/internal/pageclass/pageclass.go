@@ -45,6 +45,7 @@ const (
 // page. Match against the lower-cased URL. Kept in this file so pageclass
 // and pipeline share the same canonical list.
 var devToolBrandKeywords = []string{
+	// AI coding agents / IDEs
 	"claude", "anthropic",
 	"openai", "chatgpt", "codex", "copilot",
 	"cursor", "cline", "continue", "windsurf",
@@ -52,6 +53,22 @@ var devToolBrandKeywords = []string{
 	"notebooklm", "perplexity", "comet",
 	"snowflake", "databricks",
 	"mcp-server",
+	// Wave 2.5 — language runtimes + package managers (broader install-lure
+	// surface; nodejs-install-* was slipping through pre-expansion).
+	"nodejs", "node-js", "npm", "yarn", "pnpm",
+	"python", "pip", "poetry", "uv-pip",
+	"rust", "rustup", "cargo",
+	"golang", "go-lang",
+	"ruby", "rubygems", "rails",
+	"php", "composer",
+	"java", "maven", "gradle", "openjdk",
+	// Container + infra tooling
+	"docker", "podman", "kubernetes", "kubectl", "helm", "minikube",
+	"terraform", "ansible", "vagrant", "consul", "vault", "nomad",
+	// Editors + developer apps
+	"vscode", "visual-studio", "neovim", "emacs", "sublime", "atom-editor",
+	// Dev infra
+	"github-cli", "gitlab-runner", "hashicorp",
 }
 
 // IsSensitive reports whether the page class requires special handling
@@ -101,7 +118,7 @@ func LooksLikeDevToolInstallLure(rawurl string) bool {
 	for _, h := range []string{
 		"/docs", "/install", "/download", "/getting-started",
 		"/getting_started", "/quickstart", "/quick-start", "/setup",
-		"/guide", "/tutorial", "/cli",
+		"/guide", "/tutorial", "/cli", "/installer",
 	} {
 		if strings.Contains(l, h) {
 			hasPathHint = true
@@ -113,6 +130,22 @@ func LooksLikeDevToolInstallLure(rawurl string) bool {
 	}
 	for _, b := range devToolBrandKeywords {
 		if strings.Contains(l, b) {
+			return true
+		}
+	}
+	// Wave 2.5 — structural fallback. An SLD that LITERALLY contains
+	// "install", "installer", or "setup" combined with a /docs|/install|
+	// /download|/installer|/setup path is the canonical install-lure
+	// shape regardless of which brand the attacker is impersonating.
+	// Examples in the wild:
+	//   nodejs-install-quick.example/installer
+	//   secure-install-page.example/setup
+	//   one-click-installer.example/download
+	// Without this branch the brand list has to enumerate every runtime
+	// and language ecosystem on Earth; the structural check covers the
+	// rest. SLD-only match (not full URL) to avoid path/scheme drift.
+	if sld := extractSLD(rawurl); sld != "" {
+		if strings.Contains(sld, "install") || strings.Contains(sld, "setup-") || strings.HasPrefix(sld, "setup-") || strings.HasSuffix(sld, "-setup") {
 			return true
 		}
 	}
