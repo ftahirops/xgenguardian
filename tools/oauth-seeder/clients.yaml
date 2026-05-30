@@ -1,0 +1,136 @@
+# XGenGuardian — OAuth client registry seed.
+#
+# Each row is one publicly-documented OAuth client_id for a well-known
+# application. The verdict engine uses this to distinguish a legitimate
+# consent screen ("GitHub Desktop wants access to your repos") from an
+# attacker app riding the same provider host ("UNKNOWN-APP wants
+# Mail.ReadWrite.All on your O365 account").
+#
+# Rules for what belongs here:
+#
+#   1. The client_id must be publicly documented (vendor source code,
+#      vendor support page, vendor Graph PowerShell SDK, etc.).
+#      Client_ids are NOT secrets; the secret half is client_secret,
+#      which is irrelevant here.
+#
+#   2. The app must be a real first-party / well-known third-party app
+#      that an ordinary user might encounter. Internal/corp apps don't
+#      belong in this global list — operators add those via the portal.
+#
+#   3. sensitive_scopes lists the high-impact scopes this app is
+#      legitimately allowed to request. If an attacker steals the
+#      client_id and asks for scopes NOT in this list, the engine still
+#      flags the consent screen as suspicious.
+#
+# To add an entry: append a new block, then run
+#   python3 tools/oauth-seeder/seed.py
+#
+# Operators can add tenant-specific apps via the admin portal without
+# touching this file.
+
+clients:
+
+  # ---- GitHub (3 documented official apps) ------------------------------
+
+  - provider: github
+    client_id: 178c6fc778ccc68e1d6a
+    app_name: GitHub CLI (gh)
+    publisher: GitHub
+    trust_level: verified
+    sensitive_scopes: [repo, read:org, workflow]
+    notes: "Documented in github.com/cli/cli oauth_app.go — device-flow."
+
+  - provider: github
+    client_id: 01ab8ac9400c4e429b23
+    app_name: Visual Studio Code GitHub
+    publisher: Microsoft
+    trust_level: verified
+    sensitive_scopes: [repo, user]
+    notes: "Documented in github.com/microsoft/vscode source."
+
+  - provider: github
+    client_id: de0e3c7e9973e1c4dd77
+    app_name: GitHub Desktop
+    publisher: GitHub
+    trust_level: verified
+    sensitive_scopes: [repo, gist, user, workflow]
+    notes: "Documented in github.com/desktop/desktop config."
+
+  # ---- Google (well-known via OAuth Playground / public docs) -----------
+  # Note: many Google client_ids rotate; the ones below are sticky for
+  # the canonical CLI / device-code flows.
+
+  - provider: google
+    client_id: 32555940559.apps.googleusercontent.com
+    app_name: Google Cloud SDK (gcloud)
+    publisher: Google
+    trust_level: verified
+    sensitive_scopes:
+      - https://www.googleapis.com/auth/cloud-platform
+      - https://www.googleapis.com/auth/userinfo.email
+    notes: "Public client_id for the gcloud CLI device-flow login."
+
+  - provider: google
+    client_id: 77185425430.apps.googleusercontent.com
+    app_name: Google Drive File Stream / Backup & Sync
+    publisher: Google
+    trust_level: verified
+    sensitive_scopes:
+      - https://www.googleapis.com/auth/drive
+    notes: "Documented in Google support pages."
+
+  - provider: google
+    client_id: 717762328687-iludtf96g1hinl76e4lc1b9a82g457nn.apps.googleusercontent.com
+    app_name: Google Chrome browser sync
+    publisher: Google
+    trust_level: verified
+    sensitive_scopes:
+      - https://www.googleapis.com/auth/chromesync
+    notes: "Documented public Chrome sync client_id."
+
+  # ---- Microsoft (publicly documented via Graph PowerShell SDK + docs) --
+
+  - provider: microsoft
+    client_id: 14d82eec-204b-4c2f-b7e8-296a70dab67e
+    app_name: Microsoft Graph PowerShell SDK
+    publisher: Microsoft
+    trust_level: verified
+    sensitive_scopes:
+      - User.Read.All
+      - Directory.Read.All
+      - Mail.ReadWrite
+    notes: "Published in Microsoft Graph PowerShell SDK docs."
+
+  - provider: microsoft
+    client_id: d3590ed6-52b3-4102-aeff-aad2292ab01c
+    app_name: Microsoft Office
+    publisher: Microsoft
+    trust_level: verified
+    sensitive_scopes: [User.Read, Files.ReadWrite, Mail.ReadWrite]
+    notes: "Documented Office desktop apps client_id."
+
+  - provider: microsoft
+    client_id: 04b07795-8ddb-461a-bbee-02f9e1bf7b46
+    app_name: Microsoft Azure CLI
+    publisher: Microsoft
+    trust_level: verified
+    sensitive_scopes:
+      - https://management.azure.com/.default
+    notes: "Published Azure CLI client_id (well-known)."
+
+  - provider: microsoft
+    client_id: 1950a258-227b-4e31-a9cf-717495945fc2
+    app_name: Microsoft Azure PowerShell
+    publisher: Microsoft
+    trust_level: verified
+    sensitive_scopes:
+      - https://management.azure.com/.default
+    notes: "Published Azure PowerShell client_id."
+
+  - provider: microsoft
+    client_id: 1b730954-1685-4b74-9bfd-dac224a7b894
+    app_name: Azure Active Directory PowerShell
+    publisher: Microsoft
+    trust_level: verified
+    sensitive_scopes: [Directory.AccessAsUser.All]
+    notes: "Published AAD PowerShell client_id."

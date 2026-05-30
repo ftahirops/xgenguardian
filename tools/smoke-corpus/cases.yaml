@@ -292,3 +292,274 @@ cases:
     url: https://example.com./
     expect: any-allow
     category: edge-case
+
+  # ============================================================================
+  # Wave 2.5 — corpus expansion (51 → ~100).
+  # Adds categories the doc lists as P0/P1 so future commits are measurable
+  # against the threats the engine claims to address.
+  # ============================================================================
+
+  # ---- typosquats (P2 — should fire homoglyph after the g00gle fix) ----
+  - name: homoglyph-paypal-1-for-l
+    url: https://paypa1.example/login
+    expect: any-deny
+    category: typosquat
+
+  - name: homoglyph-amazon-zero-for-o
+    url: https://amaz0n.example/signin
+    expect: any-deny
+    category: typosquat
+
+  - name: homoglyph-microsoft-rn-for-m
+    url: https://rnicrosoft.example/login
+    expect: any-deny
+    category: typosquat
+
+  - name: typo-google-letter-swap
+    url: https://gooogle.example/
+    expect: any-deny
+    category: typosquat
+
+  - name: combosquat-paypal-account
+    url: https://paypal-account-security.example/verify
+    expect: any-deny
+    category: typosquat
+
+  # ---- fake bank logins (P0 sensitive credential phishing) ----
+  - name: fake-chase-login
+    url: https://chase-account-verify.example/login
+    expect: any-deny
+    category: fake-banking
+
+  - name: fake-wellsfargo-update
+    url: https://wellsfargo-online-update.example/account
+    expect: any-deny
+    category: fake-banking
+
+  - name: fake-citibank-secure
+    url: https://citibank-secure-banking.example/signin
+    expect: any-deny
+    category: fake-banking
+
+  - name: fake-boa-mobile
+    url: https://bankofamerica-mobile-login.example/auth
+    expect: any-deny
+    category: fake-banking
+
+  # ---- support-scam URL patterns (P0 — engine should soon catch these) ----
+  - name: support-scam-microsoft-helpline
+    url: https://microsoft-support-helpline.example/call
+    expect: any-deny
+    category: support-scam
+
+  - name: support-scam-apple-virus-alert
+    url: https://apple-virus-alert-help.example/
+    expect: any-deny
+    category: support-scam
+
+  - name: support-scam-windows-defender
+    url: https://windows-defender-warning.example/contact
+    expect: any-deny
+    category: support-scam
+
+  # ---- OAuth consent phishing (now meaningful — registry seeded) ----
+  - name: oauth-microsoft-unknown-client-high-scope
+    url: https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=00000000-aaaa-bbbb-cccc-111111111111&scope=Mail.ReadWrite+Files.ReadWrite.All&redirect_uri=https%3A%2F%2Fattacker.example%2Fcb
+    expect: any-deny
+    category: oauth-phish
+
+  - name: oauth-google-unknown-client-drive-scope
+    url: https://accounts.google.com/o/oauth2/v2/auth?client_id=999-unknown.apps.googleusercontent.com&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive&redirect_uri=https%3A%2F%2Fattacker.example
+    expect: any-deny
+    category: oauth-phish
+
+  - name: oauth-known-good-github-cli
+    url: https://github.com/login/oauth/authorize?client_id=178c6fc778ccc68e1d6a&scope=repo+read:org
+    expect: any-allow
+    category: oauth-legit
+
+  - name: oauth-known-good-vscode
+    url: https://github.com/login/oauth/authorize?client_id=01ab8ac9400c4e429b23&scope=repo+user
+    expect: any-allow
+    category: oauth-legit
+
+  # ---- crypto-drainer URL shapes (P0 — currently F grade; corpus prep) ----
+  - name: drainer-fake-claim-airdrop
+    url: https://claim-airdrop-uniswap.example/wallet
+    expect: any-deny
+    category: crypto-drainer
+
+  - name: drainer-fake-revoke
+    url: https://revoke-permissions-secure.example/connect-wallet
+    expect: any-deny
+    category: crypto-drainer
+
+  - name: drainer-metamask-update
+    url: https://metamask-wallet-update.example/sign
+    expect: any-deny
+    category: crypto-drainer
+
+  - name: drainer-fake-opensea
+    url: https://opensea-collection-claim.example/mint
+    expect: any-deny
+    category: crypto-drainer
+
+  # ---- gift-card / wire-fraud language URLs (P0 prep) ----
+  - name: gift-card-scam-1
+    url: https://amazon-gift-card-redeem-instant.example/pay
+    expect: any-deny
+    category: payment-scam
+
+  - name: wire-fraud-irs
+    url: https://irs-tax-refund-direct-deposit.example/file
+    expect: any-deny
+    category: payment-scam
+
+  # ---- fresh-domain payment pages (P0 sensitive proof gate) ----
+  - name: payment-fresh-checkout
+    url: https://newcheckout-2026.example/pay
+    expect: any-deny
+    category: fresh-payment
+
+  - name: payment-fresh-cart
+    url: https://buy-now-secure-2026.example/cart
+    expect: any-deny
+    category: fresh-payment
+
+  # ---- more email-wrapper variants (defense-in-depth) ----
+  - name: safelinks-multi-region-india
+    url: https://ind01.safelinks.protection.outlook.com/?url=https%3A%2F%2Fwww.google.com%2F&data=00
+    expect: any-allow
+    category: wrapper-benign
+
+  - name: safelinks-multi-region-jp
+    url: https://jpn01.safelinks.protection.outlook.com/?url=https%3A%2F%2Fwww.bbc.com%2F&data=00
+    expect: any-allow
+    category: wrapper-benign
+
+  - name: proofpoint-v3-format-benign
+    url: https://urldefense.com/v3/__https://www.wikipedia.org/__;!!Token!
+    expect: any-allow
+    category: wrapper-benign
+
+  - name: symantec-clicktime-benign
+    url: https://clicktime.symantec.com/abc?u=https%3A%2F%2Fwww.bbc.com%2F
+    expect: any-allow
+    category: wrapper-benign
+
+  - name: barracuda-benign
+    url: https://linkprotect.cudasvc.com/url?a=https%3A%2F%2Fwww.wikipedia.org%2F
+    expect: any-allow
+    category: wrapper-benign
+
+  - name: cisco-securemail-benign
+    url: https://secure-web.cisco.com/abc/https://www.google.com/
+    expect: any-allow
+    category: wrapper-benign
+
+  # ---- wrapper-phish (point at suspicious targets) ----
+  - name: proofpoint-pointing-to-fresh-host
+    url: https://urldefense.proofpoint.com/v2/url?u=https%3A%2F%2Fbank-login-secure-2026.example%2F
+    expect: any-deny
+    category: wrapper-phish
+
+  - name: cisco-pointing-to-homoglyph
+    url: https://secure-web.cisco.com/abc/https://g00gle.com/login
+    expect: any-deny
+    category: wrapper-phish
+
+  # ---- legit + sensitive (must not over-block on real banking sites) ----
+  - name: bank-real-chase
+    url: https://www.chase.com/personal/online-banking
+    expect: any-allow
+    category: legit-banking
+
+  - name: bank-real-citi
+    url: https://www.citi.com/
+    expect: any-allow
+    category: legit-banking
+
+  - name: bank-real-wellsfargo
+    url: https://www.wellsfargo.com/
+    expect: any-allow
+    category: legit-banking
+
+  - name: payment-real-stripe-docs
+    url: https://stripe.com/docs/payments
+    expect: any-allow
+    category: legit-payment
+
+  # ---- popular legit sensitive-action pages (must not isolate) ----
+  - name: gmail-inbox
+    url: https://mail.google.com/mail/u/0/
+    expect: any-allow
+    category: legit-sensitive
+
+  - name: aws-console
+    url: https://console.aws.amazon.com/
+    expect: any-allow
+    category: legit-sensitive
+
+  - name: github-settings
+    url: https://github.com/settings/profile
+    expect: any-allow
+    category: legit-sensitive
+
+  # ---- punycode / IDN homoglyph attempts ----
+  - name: idn-paypal-cyrillic-a
+    url: https://раypal.example/login
+    expect: any-deny
+    category: idn-homoglyph
+
+  - name: idn-google-cyrillic-o
+    url: https://gооgle.example/
+    expect: any-deny
+    category: idn-homoglyph
+
+  # ---- developer / install scam look-alikes ----
+  - name: fake-anthropic-install
+    url: https://anthropic-install-claude.example/setup.sh
+    expect: any-deny
+    category: install-lure
+
+  - name: fake-nodejs-install
+    url: https://nodejs-install-quick.example/installer
+    expect: any-deny
+    category: install-lure
+
+  # ---- Tonga / Samoa / Cocos piracy + scam ccTLDs (Wave 2 dispatch fix) ----
+  - name: piracy-multiple-1
+    url: https://streamfree-now.to/
+    expect: any
+    category: piracy-tld
+
+  - name: piracy-multiple-2
+    url: https://watchmovies-online.ws/
+    expect: any
+    category: piracy-tld
+
+  # ---- fresh OAuth provider hosts that AREN'T the real provider ----
+  - name: fake-microsoft-oauth-host
+    url: https://login-microsoft-com.example/oauth2/v2.0/authorize?client_id=anything
+    expect: any-deny
+    category: fake-oauth-host
+
+  - name: fake-google-accounts-host
+    url: https://accounts-google.example/o/oauth2/v2/auth?client_id=anything
+    expect: any-deny
+    category: fake-oauth-host
+
+  # ---- challenge / captcha walls (must not be confused for clean) ----
+  # (None added here; we rely on the engine's challenge-page detector
+  # not to mark these as ALLOW based on the wall alone.)
+
+  # ---- ports / non-standard schemes that should not crash ----
+  - name: nonstandard-port
+    url: https://example.com:8443/
+    expect: any-allow
+    category: edge-case
+
+  - name: hash-fragment-only
+    url: https://example.com/page#section
+    expect: any-allow
+    category: edge-case

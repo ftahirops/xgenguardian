@@ -228,6 +228,20 @@ type ContextOutput struct {
 	// "domain is public" to fire PUBLIC_DOMAIN_PRIVATE_IP.
 	BrowserRemoteIPIsPrivate bool
 
+	// HomoglyphBrandMatch — true when Tier-1's homoglyphScore fired with
+	// a strong match against a brand keyword (weight >= 0.85: exact match
+	// after confusable normalization, e.g. g00gle → google, paypal-style
+	// digit/Cyrillic substitution). Drives a near-hard rule in policy.Apply:
+	// untrusted homoglyph hosts ISOLATE on sensitive pages and WARN on
+	// generic pages. This signal MUST NOT be suppressed by trust score —
+	// domain-age trust on g00gle.com is exactly the failure mode the doc
+	// warns about ("popularity/age is not safety").
+	HomoglyphBrandMatch bool
+	// HomoglyphBrandName — short brand label for the matched keyword
+	// (e.g. "google"). Surfaced to the block page so the user sees
+	// "this domain impersonates Google."
+	HomoglyphBrandName  string
+
 	// Tier2Requested — true when the pipeline decided this URL needed a
 	// sandbox render (Tier-2) for evidence. Goes hand-in-hand with
 	// Tier2Available below: if Tier2Requested && !Tier2Available, the
@@ -581,6 +595,64 @@ func Apply(in Inputs) Result {
 			"vendor DNS would block, but host is in trustreg — likely vendor over-block on a real brand", 0)
 	} else {
 		r.trace("0", "", "pass", "no vendor-DNS consensus block", 0)
+	}
+
+	// --- Stage IS: homoglyph / brand-impersonation hard rule ---
+	//
+	// Tier-1 emitted `homoglyph_match` with weight ≥0.85 — the SLD,
+	// after confusable normalization, EQUALS a curated brand keyword
+	// (g00gle → google, paypa1 → paypal, microsоft → microsoft via
+	// Cyrillic 'о'). This is the strongest single-signal brand-
+	// impersonation tell.
+	//
+	// HARD rule (ignores trust score):
+	//   - sensitive page (login/payment/oauth/install) on an untrusted
+	//     homoglyph host → BLOCK. The whole point of an impersonator
+	//     is to capture credentials; ALLOWing it because the squat is
+	//     5 years old is exactly the "age == safety" failure the
+	//     architecture doc warns about.
+	//   - generic page on a homoglyph host → WARN at minimum, so the
+	//     user sees the impersonation flag before any click-through.
+	//
+	// Trustreg / brandgraph membership is the only escape: a host
+	// that's actually in the curated brand registry (extremely rare —
+	// would mean google.com itself somehow looks like a homoglyph of
+	// google.com, which can't happen because the homoglyph check
+	// already skips literal exact matches).
+	//
+	// Surfaced in the smoke corpus as the failing case
+	// `homoglyph-google` (g00gle.com). Before this rule the signal was
+	// emitted, lost because of a signal-name typo in codes.go, and
+	// then suppressed by domain-age trust score even after the typo
+	// fix. This rule closes the path end-to-end.
+	if in.Context.HomoglyphBrandMatch && !in.TrustedIdentity {
+		brand := in.Context.HomoglyphBrandName
+		if brand == "" {
+			brand = "a protected brand"
+		}
+		r.ReasonCodes = append(r.ReasonCodes, string(reasons.HomoglyphOfProtectedBrand))
+		if in.PageClass.IsSensitive() {
+			r.Verdict = Block
+			r.Confidence = 0.90
+			r.BlockReason = "This domain impersonates " + brand +
+				" (homoglyph substitution) on a sensitive page. Credentials entered here would go to the impersonator, not " + brand + "."
+			r.StageOutcome["IS"] = "fail-homoglyph-on-sensitive"
+			r.trace("IS", string(reasons.HomoglyphOfProtectedBrand), "fired",
+				"homoglyph of "+brand+" on sensitive page → BLOCK (trust ignored)", 0.85)
+			r.trace("G", "", "fail", "verdict=BLOCK (hard impersonation rule)", 0.90)
+			return r
+		}
+		// Non-sensitive: still WARN so the user sees the impersonation
+		// flag. Verdict can be promoted further by downstream rules.
+		if r.Verdict == Allow {
+			r.Verdict = Warn
+			r.Confidence = 0.75
+		}
+		r.BlockReason = "This domain impersonates " + brand +
+			" (homoglyph substitution). Verify the spelling in the address bar before continuing."
+		r.StageOutcome["IS"] = "warn-homoglyph"
+		r.trace("IS", string(reasons.HomoglyphOfProtectedBrand), "fired",
+			"homoglyph of "+brand+" → WARN (trust ignored)", 0.85)
 	}
 
 	// --- Stage F.0: category-feed BLOCK + content-vs-security split ---

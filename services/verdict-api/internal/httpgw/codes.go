@@ -31,7 +31,13 @@ var signalToCode = map[string]reasons.Code{
 	"domain_age":              reasons.DomainAgeUnderThreshold,
 	"gsb_unsafe":              reasons.GoogleWebRiskUnsafe,
 	"vt_positives":            reasons.VirusTotalPositive,
+	// Tier-1 emits the signal as "homoglyph_match" — see tier1.go's
+	// homoglyphScore. The earlier short name "homoglyph" never fired
+	// because no Signal.Name was ever exactly that string; smoke
+	// corpus caught the silent miss (g00gle.com → ALLOW). Keep both
+	// keys so legacy fusion outputs map too.
 	"homoglyph":               reasons.HomoglyphOfProtectedBrand,
+	"homoglyph_match":         reasons.HomoglyphOfProtectedBrand,
 	"levenshtein":             reasons.HomoglyphOfProtectedBrand,
 	"combosquat":              reasons.HomoglyphOfProtectedBrand,
 	"cert_age":                reasons.CertDriftOnTrustedPage,

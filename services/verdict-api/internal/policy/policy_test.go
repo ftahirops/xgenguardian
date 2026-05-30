@@ -999,3 +999,69 @@ func TestHealthGate_HardRuleStillFires_DespiteMissingTier2(t *testing.T) {
 		t.Errorf("expected PUBLIC_DOMAIN_PRIVATE_IP")
 	}
 }
+
+// ============================================================================
+// Homoglyph hard rule — smoke corpus surfaced g00gle.com → ALLOW because
+// signal-name mismatch + trust suppression killed the strong signal. The
+// new IS stage blocks/warns on homoglyph matches independent of trust.
+// ============================================================================
+
+func TestHomoglyph_OnSensitive_Blocks_IgnoringTrust(t *testing.T) {
+	r := Apply(base(Inputs{
+		PageClass:  pageclass.Login,
+		TrustScore: 0.95, // would normally suppress soft rules
+		Context: ContextOutput{
+			HomoglyphBrandMatch: true,
+			HomoglyphBrandName:  "google",
+		},
+	}))
+	if r.Verdict != Block {
+		t.Errorf("homoglyph on sensitive page must BLOCK even at trust=0.95; got %s", r.Verdict)
+	}
+	if !has(r.ReasonCodes, reasons.HomoglyphOfProtectedBrand) {
+		t.Errorf("expected HOMOGLYPH_OF_PROTECTED_BRAND in reason codes")
+	}
+}
+
+func TestHomoglyph_OnGeneric_Warns_IgnoringTrust(t *testing.T) {
+	r := Apply(base(Inputs{
+		PageClass:  pageclass.Generic,
+		TrustScore: 0.95,
+		Context: ContextOutput{
+			HomoglyphBrandMatch: true,
+			HomoglyphBrandName:  "paypal",
+		},
+	}))
+	if r.Verdict != Warn {
+		t.Errorf("homoglyph on generic page must WARN even at trust=0.95; got %s", r.Verdict)
+	}
+	if !has(r.ReasonCodes, reasons.HomoglyphOfProtectedBrand) {
+		t.Errorf("expected HOMOGLYPH_OF_PROTECTED_BRAND in reason codes")
+	}
+}
+
+func TestHomoglyph_TrustedIdentity_Suppresses(t *testing.T) {
+	// Only the curated trustreg / brandgraph membership can escape the
+	// homoglyph rule. Domain-age trust cannot.
+	r := Apply(base(Inputs{
+		PageClass:       pageclass.Login,
+		TrustedIdentity: true,
+		Context: ContextOutput{
+			HomoglyphBrandMatch: true,
+			HomoglyphBrandName:  "google",
+		},
+	}))
+	if r.Verdict == Block || r.Verdict == Warn {
+		t.Errorf("brandgraph-trusted host must escape the homoglyph rule; got %s", r.Verdict)
+	}
+}
+
+func TestHomoglyph_NotFired_NoEffect(t *testing.T) {
+	r := Apply(base(Inputs{
+		PageClass: pageclass.Login,
+		Context:   ContextOutput{},
+	}))
+	if has(r.ReasonCodes, reasons.HomoglyphOfProtectedBrand) {
+		t.Errorf("HOMOGLYPH_OF_PROTECTED_BRAND must not fire without HomoglyphBrandMatch=true")
+	}
+}

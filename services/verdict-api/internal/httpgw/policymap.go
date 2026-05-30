@@ -297,6 +297,17 @@ func buildPolicyInputs(
 			hostHints = append(hostHints, "DGA classifier")
 		case "random_host":
 			hostHints = append(hostHints, "random-host heuristic")
+		case "homoglyph_match":
+			// Strong Tier-1 brand-impersonation signal — exact match
+			// after confusable normalization. Surface as a structural
+			// flag so policy.Apply can fire its own near-hard rule
+			// without re-reading the per-signal detail string.
+			if s.Weight >= 0.85 {
+				ctx.HomoglyphBrandMatch = true
+				// Detail format is e.g. "'g00gle' → 'google' matches brand keyword 'google'"
+				// Pull out the trailing 'google' as the brand label.
+				ctx.HomoglyphBrandName = extractHomoglyphBrand(s.Detail)
+			}
 		}
 	}
 	if len(hostHints) > 0 {
@@ -666,4 +677,24 @@ func renderTitle(r *renderResponse) string {
 		return ""
 	}
 	return r.Title
+}
+
+// extractHomoglyphBrand pulls the trailing brand keyword out of a Tier-1
+// homoglyph signal detail. Detail format is:
+//
+//	'g00gle' → 'google' matches brand keyword 'google'
+//
+// We want the last single-quoted token (the matched keyword). Cheap +
+// purposely conservative: returns "" if parsing isn't a clean win, so
+// downstream UI doesn't render garbage.
+func extractHomoglyphBrand(detail string) string {
+	last := strings.LastIndex(detail, "'")
+	if last < 1 {
+		return ""
+	}
+	first := strings.LastIndex(detail[:last], "'")
+	if first < 0 || first >= last-1 {
+		return ""
+	}
+	return detail[first+1 : last]
 }

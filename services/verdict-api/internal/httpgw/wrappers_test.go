@@ -207,3 +207,24 @@ func TestUnwrap_FQDNTrailingDot_Normalized(t *testing.T) {
 		t.Errorf("trailing-dot FQDN should still match wrapper: %s → %+v", in, got)
 	}
 }
+
+func TestExtractHomoglyphBrand(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"'g00gle' → 'google' matches brand keyword 'google'", "google"},
+		{"'paypa1' → 'paypal' matches brand keyword 'paypal'", "paypal"},
+		{"no quotes here at all", ""},
+		{"", ""},
+		// One-pair input is still extractable (the last quoted token).
+		// Conservative behaviour: prefer extracting something useful over
+		// returning empty, even if the input shape is non-canonical.
+		{"single 'token' only", "token"},
+	}
+	for _, c := range cases {
+		got := extractHomoglyphBrand(c.in)
+		if got != c.want {
+			t.Errorf("extractHomoglyphBrand(%q) = %q; want %q", c.in, got, c.want)
+		}
+	}
+}
