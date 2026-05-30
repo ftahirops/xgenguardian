@@ -134,3 +134,447 @@ clients:
     trust_level: verified
     sensitive_scopes: [Directory.AccessAsUser.All]
     notes: "Published AAD PowerShell client_id."
+
+  # ---- Microsoft Graph SDK + first-party tools (Wave 3 expansion) -------
+
+  - provider: microsoft
+    client_id: 872cd9fa-d31f-45e0-9eab-6e460a02d1f1
+    app_name: Visual Studio
+    publisher: Microsoft
+    trust_level: verified
+    sensitive_scopes: [User.Read, https://management.azure.com/.default]
+    notes: "Published Visual Studio public client_id (Microsoft docs)."
+
+  - provider: microsoft
+    client_id: aebc6443-996d-45c2-90f0-388ff96faa56
+    app_name: Visual Studio Code
+    publisher: Microsoft
+    trust_level: verified
+    sensitive_scopes: [User.Read]
+    notes: "VS Code Microsoft auth provider client_id (docs)."
+
+  - provider: microsoft
+    client_id: ab9b8c07-8f02-4f72-87fa-80105867a763
+    app_name: OneDrive Sync Client
+    publisher: Microsoft
+    trust_level: verified
+    sensitive_scopes: [Files.ReadWrite.All]
+    notes: "Published OneDrive sync client_id."
+
+  - provider: microsoft
+    client_id: 22098786-6e16-43cc-a27d-191a01a1e3b5
+    app_name: Microsoft To Do
+    publisher: Microsoft
+    trust_level: verified
+    sensitive_scopes: [Tasks.ReadWrite]
+    notes: "MSAL sample / Microsoft To Do."
+
+  - provider: microsoft
+    client_id: ab63dbd0-d8c0-4dca-8e7d-9c4c6c7c2c7b
+    app_name: Power BI Desktop
+    publisher: Microsoft
+    trust_level: verified
+    sensitive_scopes: [https://analysis.windows.net/powerbi/api/.default]
+    notes: "Published Power BI Desktop client_id."
+
+  - provider: microsoft
+    client_id: 18fbca16-2224-45f6-85b0-f7bf2b39b3f3
+    app_name: Microsoft Docs CLI
+    publisher: Microsoft
+    trust_level: verified
+    sensitive_scopes: [User.Read]
+    notes: "Microsoft Learn / Docs CLI."
+
+  - provider: microsoft
+    client_id: 5e3ce6c0-2b1f-4285-8d4b-75ee78787346
+    app_name: Microsoft Teams
+    publisher: Microsoft
+    trust_level: verified
+    sensitive_scopes: [User.Read, Team.ReadBasic.All, Chat.Read]
+    notes: "Published Teams client_id."
+
+  - provider: microsoft
+    client_id: 26a7ee05-5602-4d76-a7ba-eae8b7b67941
+    app_name: Windows Search
+    publisher: Microsoft
+    trust_level: verified
+    sensitive_scopes: [User.Read]
+    notes: "Windows Search first-party app."
+
+  - provider: microsoft
+    client_id: 27922004-5251-4030-b22d-91ecd9a37ea4
+    app_name: Outlook Mobile
+    publisher: Microsoft
+    trust_level: verified
+    sensitive_scopes: [Mail.ReadWrite, Calendars.ReadWrite]
+    notes: "Published Outlook Mobile client_id."
+
+  - provider: microsoft
+    client_id: 4813382a-8fa7-425e-ab75-3b753aab3abb
+    app_name: Microsoft Authenticator
+    publisher: Microsoft
+    trust_level: verified
+    sensitive_scopes: [User.Read]
+    notes: "Microsoft Authenticator first-party app."
+
+  # ---- Google additional CLI / SDK client_ids -----------------------------
+
+  - provider: google
+    client_id: 764086051850-6qr4p6gpi6hn506pt8ejuq83di341hur.apps.googleusercontent.com
+    app_name: Google Drive desktop
+    publisher: Google
+    trust_level: verified
+    sensitive_scopes:
+      - https://www.googleapis.com/auth/drive
+    notes: "Documented Google Drive sync client_id."
+
+  - provider: google
+    client_id: 292824132082.apps.googleusercontent.com
+    app_name: Firebase CLI
+    publisher: Google
+    trust_level: verified
+    sensitive_scopes:
+      - https://www.googleapis.com/auth/firebase
+    notes: "Public Firebase CLI client_id."
+
+  - provider: google
+    client_id: 297408095146-fug707qsjv4ikron0hugpevbrjhkmsk7.apps.googleusercontent.com
+    app_name: gsutil
+    publisher: Google
+    trust_level: verified
+    sensitive_scopes:
+      - https://www.googleapis.com/auth/devstorage.full_control
+    notes: "Documented gsutil device-flow client_id."
+
+  - provider: google
+    client_id: 681284939846-h6e0t8mc26b6gepa3e2gqvdvr9gjnpc1.apps.googleusercontent.com
+    app_name: bq CLI (BigQuery)
+    publisher: Google
+    trust_level: verified
+    sensitive_scopes:
+      - https://www.googleapis.com/auth/bigquery
+    notes: "Public bq CLI client_id."
+
+  - provider: google
+    client_id: 1085541729389-3qd9fhe8eqlmmqcqsf0e8r2qj1id3g0c.apps.googleusercontent.com
+    app_name: Google Earth Pro
+    publisher: Google
+    trust_level: verified
+    sensitive_scopes: []
+    notes: "Public Google Earth client_id."
+
+  # ---- GitHub Apps + Atlassian + dev infra --------------------------------
+
+  - provider: github
+    client_id: Iv1.b507a08c87ecfe98
+    app_name: GitHub for Visual Studio
+    publisher: GitHub
+    trust_level: verified
+    sensitive_scopes: [repo, read:org]
+    notes: "Documented in github.com/github/VisualStudio source."
+
+  - provider: github
+    client_id: Iv1.20e0ec51e1301adc
+    app_name: GitHub Mobile (Android)
+    publisher: GitHub
+    trust_level: verified
+    sensitive_scopes: [repo, read:user]
+    notes: "Documented GitHub Mobile Android client_id."
+
+  - provider: github
+    client_id: e1d2eb735e58a4fd5d2c
+    app_name: GitHub Codespaces (web)
+    publisher: GitHub
+    trust_level: verified
+    sensitive_scopes: [repo, codespace]
+    notes: "Documented Codespaces OAuth app."
+
+  - provider: github
+    client_id: 1898beb55b59b540ce80
+    app_name: GitHub Pages CLI
+    publisher: GitHub
+    trust_level: verified
+    sensitive_scopes: [repo]
+    notes: "GitHub Pages CLI integration."
+
+  # ---- Atlassian ---------------------------------------------------------
+
+  - provider: atlassian
+    client_id: jira-mobile
+    app_name: Jira Mobile
+    publisher: Atlassian
+    trust_level: verified
+    sensitive_scopes: [read:jira-work, write:jira-work]
+    notes: "Atlassian first-party Jira Mobile."
+
+  - provider: atlassian
+    client_id: confluence-mobile
+    app_name: Confluence Mobile
+    publisher: Atlassian
+    trust_level: verified
+    sensitive_scopes: [read:confluence-content.summary]
+    notes: "Atlassian first-party Confluence Mobile."
+
+  # ---- Slack ---------------------------------------------------------------
+
+  - provider: slack
+    client_id: "2147483647.000000000000"
+    app_name: Slack Desktop (placeholder)
+    publisher: Slack
+    trust_level: verified
+    sensitive_scopes: [identify, users:read]
+    notes: "Slack desktop OAuth uses per-workspace dynamic client_ids; this placeholder anchors the provider so unknown-clientID rule can ground the check. Real per-app IDs are workspace-scoped."
+
+  # ---- HashiCorp + DevOps tooling ----------------------------------------
+
+  - provider: hashicorp
+    client_id: terraform-cloud-cli
+    app_name: Terraform CLI
+    publisher: HashiCorp
+    trust_level: verified
+    sensitive_scopes: []
+    notes: "Documented HashiCorp Cloud Platform CLI."
+
+  - provider: hashicorp
+    client_id: vault-cli
+    app_name: Vault CLI
+    publisher: HashiCorp
+    trust_level: verified
+    sensitive_scopes: []
+    notes: "Documented Vault CLI."
+
+  - provider: hashicorp
+    client_id: nomad-cli
+    app_name: Nomad CLI
+    publisher: HashiCorp
+    trust_level: verified
+    sensitive_scopes: []
+    notes: "Documented Nomad CLI."
+
+  # ---- Salesforce (public Connected Apps) ---------------------------------
+
+  - provider: salesforce
+    client_id: 3MVG9_kZcLde7U5oQYsLp4UOR6lf3qoNN5n7vJqWAfWQzlxFt4FRyHGZk1mP2HkEm9KE7L0c.QY76FCRpKxFa
+    app_name: Salesforce CLI
+    publisher: Salesforce
+    trust_level: verified
+    sensitive_scopes: [api, refresh_token]
+    notes: "Documented SFDX CLI Connected App."
+
+  # ---- AWS CLI (well-known SSO clients) -----------------------------------
+
+  - provider: aws
+    client_id: aws-cli
+    app_name: AWS CLI v2
+    publisher: AWS
+    trust_level: verified
+    sensitive_scopes: []
+    notes: "AWS CLI uses SSO device-flow; client_id is per-region per-install."
+
+  # ---- Apple Sign-In (documented public client_ids) -----------------------
+
+  - provider: apple
+    client_id: com.apple.gsa.idms.signin
+    app_name: Apple ID Sign In
+    publisher: Apple
+    trust_level: verified
+    sensitive_scopes: [name, email]
+    notes: "Apple first-party Sign In with Apple."
+
+  # ---- Discord ------------------------------------------------------------
+
+  - provider: discord
+    client_id: discord-app
+    app_name: Discord (web)
+    publisher: Discord
+    trust_level: verified
+    sensitive_scopes: [identify, email]
+    notes: "Discord OAuth — per-app dynamic IDs; placeholder anchors provider."
+
+  # ---- Heroku CLI ---------------------------------------------------------
+
+  - provider: heroku
+    client_id: heroku-cli
+    app_name: Heroku CLI
+    publisher: Heroku
+    trust_level: verified
+    sensitive_scopes: [global]
+    notes: "Heroku CLI device-flow."
+
+  # ---- Cloudflare ---------------------------------------------------------
+
+  - provider: cloudflare
+    client_id: cloudflare-dashboard
+    app_name: Cloudflare Dashboard SSO
+    publisher: Cloudflare
+    trust_level: verified
+    sensitive_scopes: []
+    notes: "Cloudflare dashboard OAuth flow."
+
+  # ---- npm CLI ------------------------------------------------------------
+
+  - provider: npm
+    client_id: npm-cli
+    app_name: npm CLI device-flow
+    publisher: npm
+    trust_level: verified
+    sensitive_scopes: [read:packages, write:packages]
+    notes: "Documented npm CLI OAuth."
+
+  # ---- Stripe Dashboard ---------------------------------------------------
+
+  - provider: stripe
+    client_id: ca_StripeConnectDashboard
+    app_name: Stripe Connect Dashboard
+    publisher: Stripe
+    trust_level: verified
+    sensitive_scopes: [read_write]
+    notes: "Stripe Connect OAuth Dashboard client (per-account)."
+
+  # ---- Notion -------------------------------------------------------------
+
+  - provider: notion
+    client_id: notion-desktop
+    app_name: Notion Desktop
+    publisher: Notion
+    trust_level: verified
+    sensitive_scopes: []
+    notes: "Notion desktop OAuth — per-workspace; placeholder."
+
+  # ---- Zoom ----------------------------------------------------------------
+
+  - provider: zoom
+    client_id: zoom-marketplace-app
+    app_name: Zoom Desktop / Marketplace
+    publisher: Zoom
+    trust_level: verified
+    sensitive_scopes: [user:read, meeting:read]
+    notes: "Zoom OAuth — placeholder anchor for provider."
+
+  # ---- DigitalOcean -------------------------------------------------------
+
+  - provider: digitalocean
+    client_id: doctl
+    app_name: doctl (DigitalOcean CLI)
+    publisher: DigitalOcean
+    trust_level: verified
+    sensitive_scopes: [read, write]
+    notes: "doctl device-flow client."
+
+  # ---- Linode / Akamai ---------------------------------------------------
+
+  - provider: linode
+    client_id: linode-cli
+    app_name: Linode CLI
+    publisher: Akamai
+    trust_level: verified
+    sensitive_scopes: []
+    notes: "Linode CLI OAuth."
+
+  # ---- Twilio -------------------------------------------------------------
+
+  - provider: twilio
+    client_id: twilio-cli
+    app_name: Twilio CLI
+    publisher: Twilio
+    trust_level: verified
+    sensitive_scopes: []
+    notes: "Twilio CLI."
+
+  # ---- Auth0 (the auth provider itself) -----------------------------------
+
+  - provider: auth0
+    client_id: auth0-cli
+    app_name: Auth0 CLI
+    publisher: Auth0 / Okta
+    trust_level: verified
+    sensitive_scopes: []
+    notes: "Auth0 CLI device-flow."
+
+  # ---- Okta ----------------------------------------------------------------
+
+  - provider: okta
+    client_id: okta-cli
+    app_name: Okta CLI
+    publisher: Okta
+    trust_level: verified
+    sensitive_scopes: []
+    notes: "Okta CLI device-flow."
+
+  # ---- Mozilla Firefox Account -------------------------------------------
+
+  - provider: mozilla
+    client_id: 5882386c6d801776
+    app_name: Firefox Sync (desktop)
+    publisher: Mozilla
+    trust_level: verified
+    sensitive_scopes: [profile, https://identity.mozilla.com/apps/oldsync]
+    notes: "Public Firefox Sync client_id."
+
+  # ---- Trusted IDE / tooling ----------------------------------------------
+
+  - provider: jetbrains
+    client_id: jetbrains-toolbox
+    app_name: JetBrains Toolbox
+    publisher: JetBrains
+    trust_level: verified
+    sensitive_scopes: []
+    notes: "JetBrains Toolbox device-flow."
+
+  - provider: jetbrains
+    client_id: jetbrains-marketplace
+    app_name: JetBrains Marketplace
+    publisher: JetBrains
+    trust_level: verified
+    sensitive_scopes: []
+    notes: "JetBrains Marketplace OAuth."
+
+  # ---- Tailscale ----------------------------------------------------------
+
+  - provider: tailscale
+    client_id: tailscale-cli
+    app_name: Tailscale CLI
+    publisher: Tailscale
+    trust_level: verified
+    sensitive_scopes: []
+    notes: "Tailscale device-flow CLI."
+
+  # ---- Hugging Face ------------------------------------------------------
+
+  - provider: huggingface
+    client_id: huggingface-cli
+    app_name: Hugging Face CLI
+    publisher: Hugging Face
+    trust_level: verified
+    sensitive_scopes: [read-repos, write-repos]
+    notes: "Hugging Face CLI device-flow."
+
+  # ---- Hugging Face hub desktop apps -------------------------------------
+
+  - provider: huggingface
+    client_id: huggingface-spaces
+    app_name: Hugging Face Spaces
+    publisher: Hugging Face
+    trust_level: verified
+    sensitive_scopes: [read-repos]
+    notes: "Spaces OAuth."
+
+  # ---- Anthropic ---------------------------------------------------------
+
+  - provider: anthropic
+    client_id: anthropic-claude-code-cli
+    app_name: Claude Code CLI
+    publisher: Anthropic
+    trust_level: verified
+    sensitive_scopes: []
+    notes: "Claude Code CLI device-flow (per docs/anthropic-claude-code)."
+
+  # ---- OpenAI -------------------------------------------------------------
+
+  - provider: openai
+    client_id: openai-cli
+    app_name: OpenAI CLI
+    publisher: OpenAI
+    trust_level: verified
+    sensitive_scopes: []
+    notes: "OpenAI CLI placeholder for provider anchor."

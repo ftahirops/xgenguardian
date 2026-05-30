@@ -272,6 +272,11 @@ func FromURL(rawurl string) Class {
 	return Generic
 }
 
+// ExtractSLD exposes the package-local extractSLD helper. Used by
+// internal/httpgw to feed support-scam scoring with a consistent SLD
+// definition.
+func ExtractSLD(rawurl string) string { return extractSLD(rawurl) }
+
 // extractSLD returns the leftmost label of the registrable domain in
 // lowercase. Cheap host-only parser — does NOT do public-suffix lookup
 // (too much policy weight for this branch). Returns "" on unparseable

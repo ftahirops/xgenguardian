@@ -25,6 +25,7 @@ import (
 	"github.com/xgenguardian/services/verdict-api/internal/brandgraph"
 	"github.com/xgenguardian/services/verdict-api/internal/policy"
 	"github.com/xgenguardian/services/verdict-api/internal/reasons"
+	"github.com/xgenguardian/services/verdict-api/internal/supportscam"
 	"github.com/xgenguardian/services/verdict-api/internal/trustscore"
 	"github.com/xgenguardian/services/verdict-api/internal/vendordns"
 )
@@ -201,6 +202,24 @@ func buildPolicyInputs(
 		Tier2Requested: tier2Requested,
 		Tier2Available: render != nil,
 	}
+
+	// Wave 3 / Phase 1 — Support-scam scoring. Today the inputs are
+	// URL + SLD + page title (when render available). Phase 2 adds
+	// visible DOM text from sandbox-render; Phase 3 adds OCR text.
+	// host-in-brandgraph short-circuits the brand-impersonation
+	// category so legitimate Microsoft support pages on microsoft.com
+	// don't fire.
+	sld := pageclassExtractSLD(req.URL)
+	title := renderTitle(render)
+	ssRes := supportscam.Score(supportscam.Inputs{
+		URL:              req.URL,
+		SLD:              sld,
+		Title:            title,
+		Host:             in.Domain,
+		HostInBrandgraph: brandgraph.IsAnyTrust(in.Domain),
+	})
+	ctx.SupportScamScore = ssRes.Score
+	ctx.SupportScamCategories = supportScamCategoryNames(ssRes)
 	// Domain age (from RDAP). in.DomainAge is time.Duration; 0 means unknown
 	// (RDAP lookup failed, no registration date in response, or RDAP not
 	// configured). DomainAgeKnown lets the policy distinguish "we know it's
@@ -705,4 +724,26 @@ func extractHomoglyphBrand(detail string) string {
 		return ""
 	}
 	return detail[first+1 : last]
+}
+
+// pageclassExtractSLD wraps pageclass.ExtractSLD so this file's import
+// list can keep `pageclass` once and use a stable spelling.
+func pageclassExtractSLD(rawurl string) string {
+	return pageclass.ExtractSLD(rawurl)
+}
+
+// supportScamCategoryNames returns the unique category names that
+// fired in a supportscam.Result, in the order produced by the scorer.
+// Used by policy.Apply to emit one reason code per category.
+func supportScamCategoryNames(r supportscam.Result) []string {
+	seen := map[supportscam.Category]struct{}{}
+	out := make([]string, 0, len(r.Hits))
+	for _, h := range r.Hits {
+		if _, dup := seen[h.Category]; dup {
+			continue
+		}
+		seen[h.Category] = struct{}{}
+		out = append(out, string(h.Category))
+	}
+	return out
 }

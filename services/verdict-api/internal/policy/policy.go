@@ -228,6 +228,16 @@ type ContextOutput struct {
 	// "domain is public" to fire PUBLIC_DOMAIN_PRIVATE_IP.
 	BrowserRemoteIPIsPrivate bool
 
+	// SupportScamScore — Wave 3 / Phase 1. Score in [0, 1.5] from
+	// internal/supportscam. URL+SLD+title-based today; visible-DOM
+	// text plugs in at Phase 2; OCR at Phase 3. Crossing the
+	// thresholds in supportscam.go drives a policy rule that adds
+	// SUPPORT_SCAM_LANGUAGE + the per-category reason codes to the
+	// verdict. See supportscam.ThresholdWarn / ThresholdBlock /
+	// ThresholdHardBlock for the meaning of each band.
+	SupportScamScore        float64
+	SupportScamCategories   []string // category names that fired (best-effort, for trace)
+
 	// HomoglyphBrandMatch — true when Tier-1's homoglyphScore fired with
 	// a strong match against a brand keyword (weight >= 0.85: exact match
 	// after confusable normalization, e.g. g00gle → google, paypal-style
@@ -653,6 +663,84 @@ func Apply(in Inputs) Result {
 		r.StageOutcome["IS"] = "warn-homoglyph"
 		r.trace("IS", string(reasons.HomoglyphOfProtectedBrand), "fired",
 			"homoglyph of "+brand+" → WARN (trust ignored)", 0.85)
+	}
+
+	// --- Stage SS: tech-support / fake-helpdesk scam scorer (Wave 3 Phase 1) ---
+	//
+	// Consumes ctx.SupportScamScore + SupportScamCategories produced by
+	// internal/supportscam over URL + SLD + title (and later DOM text +
+	// OCR). Three policy bands:
+	//
+	//   score >= 0.80 (HardBlock) → BLOCK regardless of page class.
+	//     Composite scams (brand impersonation + remote-tool ask +
+	//     gift-card demand) target everyone — there's no benign reading.
+	//   score >= 0.50 (Block) → BLOCK on sensitive pages; WARN on
+	//     generic. The host has multiple scam indicators but no smoking
+	//     gun.
+	//   score >= 0.30 (Warn) → WARN. Single-category signal that
+	//     warrants surfacing to the user.
+	//
+	// Trust does NOT suppress this rule. Brand-impersonation already has
+	// its own escape (host-in-brandgraph short-circuit inside the scorer)
+	// so highly-trusted hosts that legitimately discuss support topics
+	// don't fire. Adding trust-score suppression here would re-introduce
+	// the "popularity is safety" failure the doc explicitly warns about.
+	if in.Context.SupportScamScore >= 0.80 {
+		r.Verdict = Block
+		r.Confidence = 0.92
+		r.BlockReason = "This page matches multiple tech-support-scam patterns " +
+			"(brand impersonation, payment demand, remote-access tool, or " +
+			"scareware language). Real support never demands gift cards or " +
+			"asks you to install remote-control software."
+		r.ReasonCodes = append(r.ReasonCodes, string(reasons.SupportScamLanguage))
+		for _, c := range supportScamReasonCodesFor(in.Context.SupportScamCategories) {
+			r.ReasonCodes = append(r.ReasonCodes, string(c))
+		}
+		r.StageOutcome["SS"] = "fail-hardblock"
+		r.trace("SS", string(reasons.SupportScamLanguage), "fired",
+			"composite tech-support-scam pattern → BLOCK", in.Context.SupportScamScore)
+		r.trace("G", "", "fail", "verdict=BLOCK (composite support-scam, ignores trust)",
+			0.92)
+		return r
+	}
+	if in.Context.SupportScamScore >= 0.50 {
+		if in.PageClass.IsSensitive() {
+			r.Verdict = Block
+			r.Confidence = 0.85
+			r.BlockReason = "This page matches tech-support-scam patterns on a sensitive page class."
+			r.ReasonCodes = append(r.ReasonCodes, string(reasons.SupportScamLanguage))
+			for _, c := range supportScamReasonCodesFor(in.Context.SupportScamCategories) {
+				r.ReasonCodes = append(r.ReasonCodes, string(c))
+			}
+			r.StageOutcome["SS"] = "fail-sensitive"
+			r.trace("SS", string(reasons.SupportScamLanguage), "fired",
+				"support-scam patterns on sensitive page → BLOCK", in.Context.SupportScamScore)
+			r.trace("G", "", "fail", "verdict=BLOCK", 0.85)
+			return r
+		}
+		if r.Verdict == Allow {
+			r.Verdict = Warn
+			r.Confidence = 0.70
+		}
+		r.ReasonCodes = append(r.ReasonCodes, string(reasons.SupportScamLanguage))
+		for _, c := range supportScamReasonCodesFor(in.Context.SupportScamCategories) {
+			r.ReasonCodes = append(r.ReasonCodes, string(c))
+		}
+		r.StageOutcome["SS"] = "warn-block-threshold"
+		r.trace("SS", string(reasons.SupportScamLanguage), "fired",
+			"support-scam patterns → WARN (generic page)", in.Context.SupportScamScore)
+	} else if in.Context.SupportScamScore >= 0.30 {
+		if r.Verdict == Allow {
+			r.Verdict = Warn
+			r.Confidence = 0.60
+		}
+		r.ReasonCodes = append(r.ReasonCodes, string(reasons.SupportScamLanguage))
+		for _, c := range supportScamReasonCodesFor(in.Context.SupportScamCategories) {
+			r.ReasonCodes = append(r.ReasonCodes, string(c))
+		}
+		r.StageOutcome["SS"] = "warn-threshold"
+		r.trace("SS", string(reasons.SupportScamLanguage), "fired",
+			"support-scam patterns → WARN", in.Context.SupportScamScore)
 	}
 
 	// --- Stage F.0: category-feed BLOCK + content-vs-security split ---
@@ -1735,4 +1823,34 @@ var localTLDs = []string{
 	"local", "localhost", "internal", "intranet",
 	"test", "example", "invalid",
 	"home", "lan", "corp", "private",
+}
+
+// supportScamReasonCodesFor maps the per-category names emitted by
+// internal/supportscam.Score into reason codes the response surfaces.
+// One-to-one mapping; unknown categories are skipped silently so a
+// scorer addition without a code-update doesn't blow up the response.
+func supportScamReasonCodesFor(cats []string) []reasons.Code {
+	if len(cats) == 0 {
+		return nil
+	}
+	var out []reasons.Code
+	for _, c := range cats {
+		switch c {
+		case "scareware":
+			out = append(out, reasons.FakeSecurityWarning)
+		case "payment_demand":
+			out = append(out, reasons.GiftCardPaymentDemand)
+		case "remote_tool":
+			out = append(out, reasons.RemoteToolLure)
+		case "brand_impersonation":
+			out = append(out, reasons.FakeTechSupportBrand)
+		case "gov_impersonation":
+			out = append(out, reasons.GovImpersonation)
+		case "support_phone_lure":
+			// Phone lure alone isn't a hard reason code; it composes
+			// with the others via SupportScamLanguage. Skip to keep
+			// the reason-code surface narrow.
+		}
+	}
+	return out
 }

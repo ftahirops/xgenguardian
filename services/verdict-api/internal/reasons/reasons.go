@@ -139,6 +139,18 @@ const (
 	// ALLOW-ing without the evidence that would normally fire the
 	// page-content rules. Closes the silent-fake-safety bug class.
 	Tier2DataUnavailable          Code = "TIER2_DATA_UNAVAILABLE"
+
+	// Support-scam / fake-helpdesk scorer (Wave 3 Phase 1).
+	// Emitted by internal/supportscam when the per-category score
+	// crosses ThresholdWarn / ThresholdBlock. Sources today: URL +
+	// SLD + page title. Phase 2 adds visible DOM text; Phase 3 adds
+	// OCR. Pairs FTC/FBI/Microsoft scam guidance into one signal.
+	SupportScamLanguage           Code = "SUPPORT_SCAM_LANGUAGE"
+	FakeSecurityWarning           Code = "FAKE_SECURITY_WARNING"
+	RemoteToolLure                Code = "REMOTE_TOOL_LURE"
+	GiftCardPaymentDemand         Code = "GIFT_CARD_PAYMENT_DEMAND"
+	FakeTechSupportBrand          Code = "FAKE_TECH_SUPPORT_BRAND"
+	GovImpersonation              Code = "GOV_IMPERSONATION"
 )
 
 // Template is the human-readable form rendered in interstitials and the portal.
@@ -502,6 +514,36 @@ var templates = map[Code]Template{
 		Title:    "Deep-scan unavailable",
 		Body:     "The page-content sandbox was unavailable when this URL was checked, so the engine could not verify the page DOM, forms, or scripts. On sensitive pages this is treated as missing proof, not as a clean signal.",
 		Severity: SeverityMedium,
+	},
+	SupportScamLanguage: {
+		Title:    "Tech-support scam patterns detected",
+		Body:     "This URL or page contains language consistent with fake-helpdesk scams (FTC/FBI/Microsoft pattern). Real support never calls you unexpectedly, demands payment in gift cards, or asks you to install remote-access tools.",
+		Severity: SeverityHigh,
+	},
+	FakeSecurityWarning: {
+		Title:    "Fake security warning",
+		Body:     "The page imitates a security alert (\"your computer is infected\", \"virus detected\") on an unrelated host. Real Microsoft / Apple / Norton / McAfee warnings never instruct you to call a phone number from a webpage.",
+		Severity: SeverityHigh,
+	},
+	RemoteToolLure: {
+		Title:    "Remote-access tool installation requested",
+		Body:     "The page asks you to install AnyDesk / TeamViewer / Quick Assist / RustDesk / similar remote-access software. This is the first step in the FBI Phantom Hacker pattern — once the attacker connects, your data is at risk.",
+		Severity: SeverityCritical,
+	},
+	GiftCardPaymentDemand: {
+		Title:    "Gift-card or wire-payment demand",
+		Body:     "The page demands payment via gift card, Western Union, MoneyGram, wire transfer, or cryptocurrency. FTC: legitimate businesses never ask for gift-card payment. This is a scam-only payment pattern.",
+		Severity: SeverityCritical,
+	},
+	FakeTechSupportBrand: {
+		Title:    "Impersonates a tech-support brand",
+		Body:     "The page claims to be Microsoft / Apple / Norton / McAfee / Google support, but the hosting domain isn't owned by that brand. Real support pages live on the brand's own canonical domain.",
+		Severity: SeverityHigh,
+	},
+	GovImpersonation: {
+		Title:    "Impersonates a government agency",
+		Body:     "The page references the IRS / SSA / Medicare / HMRC / similar government agency in a context consistent with a scam (refund claim, arrest warrant, unpaid taxes). Government agencies do not contact citizens by random webpage popup.",
+		Severity: SeverityHigh,
 	},
 	OverlayClickjack: {
 		Title:    "Clickjacking overlay detected",
