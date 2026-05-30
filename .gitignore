@@ -16,6 +16,10 @@ services/registry-svc/registry-svc
 
 # Go
 vendor/
+# Exception: extension vendors JS libraries (e.g. jsQR) that ARE source-
+# of-truth and must ship in the repo.
+!apps/extension/src/vendor/
+!apps/extension/src/vendor/**
 
 # Node / Next.js
 node_modules/
