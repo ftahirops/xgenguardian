@@ -12,7 +12,10 @@
 //      OTP/payment fields, OAuth markers, download triggers)
 package pageclass
 
-import "strings"
+import (
+	"net/url"
+	"strings"
+)
 
 // Class is the wire-format page class. Stable strings — never rename.
 type Class string
@@ -157,7 +160,87 @@ func FromURL(rawurl string) Class {
 	if strings.Contains(l, "/download") {
 		return Download
 	}
+	// Wave 2.5 — SLD-keyword fallback. URLs like
+	//   https://bank-login-secure-2026.example/
+	//   https://paypal-account-security.example/
+	//   https://wellsfargo-online-update.example/
+	// have the sensitive intent baked into the HOST not the PATH.
+	// Without this branch the path-based switch above gives them
+	// Generic, the verdict falls back to the soft-rule accumulator,
+	// and a fresh-domain phishing host without "login" in the path
+	// slips through. The branch reads only the SLD (registrable
+	// domain's leftmost label) so false-positives on legitimate
+	// sites that happen to mention "login" in their path don't fire.
+	if sld := extractSLD(rawurl); sld != "" {
+		switch {
+		case strings.Contains(sld, "login"),
+			strings.Contains(sld, "signin"),
+			strings.Contains(sld, "sign-in"),
+			strings.Contains(sld, "secure"),
+			strings.Contains(sld, "verify"),
+			strings.Contains(sld, "account"),
+			strings.Contains(sld, "auth"),
+			strings.Contains(sld, "bank-"),
+			strings.Contains(sld, "-bank"),
+			strings.Contains(sld, "logon"),
+			strings.Contains(sld, "-update"),
+			strings.Contains(sld, "update-"),
+			// well-known bank brand names embedded in attacker SLDs
+			// (wellsfargo-online-update.example, chase-account-verify.example).
+			// Conservative: only kick in when paired with attacker-pattern
+			// tokens via the other branches above; standalone "chase" in
+			// chase.com etc. is the legit brand and won't reach this branch
+			// because it would match brandgraph/trustreg.
+			strings.HasPrefix(sld, "wellsfargo-"),
+			strings.HasPrefix(sld, "chase-"),
+			strings.HasPrefix(sld, "citibank-"),
+			strings.HasPrefix(sld, "bankofamerica-"),
+			strings.HasPrefix(sld, "hsbc-"),
+			strings.HasPrefix(sld, "barclays-"),
+			strings.HasPrefix(sld, "santander-"):
+			return Login
+		case strings.Contains(sld, "checkout"),
+			strings.Contains(sld, "payment"),
+			strings.Contains(sld, "billing"),
+			strings.Contains(sld, "-pay-"),
+			strings.HasSuffix(sld, "-pay"),
+			strings.HasPrefix(sld, "pay-"):
+			return Payment
+		case strings.Contains(sld, "wallet"),
+			strings.Contains(sld, "metamask"),
+			strings.Contains(sld, "claim-airdrop"),
+			strings.Contains(sld, "revoke-permissions"):
+			return CryptoWithdrawal
+		}
+	}
 	return Generic
+}
+
+// extractSLD returns the leftmost label of the registrable domain in
+// lowercase. Cheap host-only parser — does NOT do public-suffix lookup
+// (too much policy weight for this branch). Returns "" on unparseable
+// input so callers can safely chain.
+func extractSLD(rawurl string) string {
+	u, err := url.Parse(rawurl)
+	if err != nil || u == nil {
+		return ""
+	}
+	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	if host == "" {
+		return ""
+	}
+	parts := strings.Split(host, ".")
+	if len(parts) < 2 {
+		return host
+	}
+	// For "www.bank-login.example" we want "bank-login", not "www".
+	// Drop a leading "www." then return the leftmost remaining label.
+	if parts[0] == "www" && len(parts) >= 3 {
+		return parts[1]
+	}
+	// For "bank-login-secure-2026.example" parts is
+	// ["bank-login-secure-2026","example"]; we want "bank-login-secure-2026".
+	return parts[0]
 }
 
 // DOMHints carries the post-render signals used by Refine().

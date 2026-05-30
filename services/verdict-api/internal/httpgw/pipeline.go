@@ -136,6 +136,15 @@ func (s *Server) runPipelineWithTier(ctx context.Context, req checkRequest, tier
 			wrapperChain = append(wrapperChain, wrapperHop{Wrapper: unwrap2.Wrapper, URL: req.URL})
 			req.URL = unwrap2.URL
 		}
+		// Wave 2.5 — force Tier-2 on the unwrapped target. If a URL
+		// came in through an email-gateway wrapper, the user was
+		// almost certainly targeted via email — the #1 phishing
+		// vector. The unwrapped target deserves a deep look even
+		// when Tier-1 sees nothing alarming. Without this the
+		// proofpoint-pointing-to-fresh-host class slips through:
+		// the wrapper hop validates "I came from a real mail
+		// gateway" but the target is the attacker's payload.
+		req.ForceRescan = true
 	}
 
 	domain := domainFromURL(req.URL)

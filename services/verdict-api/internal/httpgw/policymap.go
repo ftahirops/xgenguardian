@@ -298,14 +298,22 @@ func buildPolicyInputs(
 		case "random_host":
 			hostHints = append(hostHints, "random-host heuristic")
 		case "homoglyph_match":
-			// Strong Tier-1 brand-impersonation signal — exact match
-			// after confusable normalization. Surface as a structural
-			// flag so policy.Apply can fire its own near-hard rule
-			// without re-reading the per-signal detail string.
-			if s.Weight >= 0.85 {
+			// Strong Tier-1 brand-impersonation signal. Two flavors both
+			// land here:
+			//   weight 0.85 — pure confusable substitution (g00gle → google
+			//                 via 0→o, paypa1 → paypal via 1→l).
+			//   weight 0.70 — Levenshtein ≤2 typo (gooogle → google by
+			//                 inserting an o; paypall → paypal by deletion).
+			// Both are high-confidence impersonation tells; both deserve
+			// the same hard rule in policy.Apply. Pre-Wave-3 the
+			// threshold was 0.85 and gooogle.example slipped through
+			// despite Tier-1 emitting weight 0.70 — caught by smoke
+			// corpus case typo-google-letter-swap.
+			if s.Weight >= 0.70 {
 				ctx.HomoglyphBrandMatch = true
 				// Detail format is e.g. "'g00gle' → 'google' matches brand keyword 'google'"
-				// Pull out the trailing 'google' as the brand label.
+				// or "edit distance 1 from brand keyword 'google' (via gooogle)".
+				// In both shapes the last single-quoted token is the brand.
 				ctx.HomoglyphBrandName = extractHomoglyphBrand(s.Detail)
 			}
 		}

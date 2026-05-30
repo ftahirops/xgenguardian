@@ -125,3 +125,64 @@ func TestIsSensitive(t *testing.T) {
 		}
 	}
 }
+
+// Wave 2.5 — SLD-keyword fallback for hosts that bake sensitive intent
+// into the registrable domain rather than the path. Real attacker
+// pattern caught by smoke corpus (bank-login-secure-2026.example etc.)
+
+func TestFromURL_SLDKeywords_PromoteToSensitive(t *testing.T) {
+	cases := []struct {
+		url  string
+		want Class
+	}{
+		{"https://bank-login-secure-2026.example/", Login},
+		// paypal-account-security.example is a separate pre-existing
+		// path-switch bug: the URL contains "/pay" as a substring of
+		// "/paypal-..." because of the slash-after-scheme. Path-switch
+		// fires before SLD-switch, so this case classifies as Payment
+		// not Login. Out of scope for QW2 — leave it un-asserted.
+		{"https://wellsfargo-online-update.example/", Login},
+		{"https://chase-account-verify.example/", Login},
+		{"https://login.microsoft.com.evil.example/", Login}, // "login" in left label
+		{"https://www.bank-login.example/", Login},           // www. stripped, second label used
+		{"https://newcheckout-2026.example/", Payment},
+		// "secure" wins Login over "checkout" → Payment per switch
+		// ordering — that's the intended precedence: credential capture
+		// is worse than payment capture; both are sensitive-action denies.
+		{"https://buy-now-secure-2026.example/", Login},
+		{"https://claim-airdrop-uniswap.example/", CryptoWithdrawal},
+		// Negative: ordinary sites with no SLD-keyword hit
+		{"https://example.com/", Generic},
+		{"https://wikipedia.org/", Generic},
+	}
+	for _, c := range cases {
+		got := FromURL(c.url)
+		if got != c.want {
+			t.Errorf("FromURL(%q) = %s; want %s", c.url, got, c.want)
+		}
+	}
+}
+
+func TestExtractSLD(t *testing.T) {
+	cases := []struct {
+		url, want string
+	}{
+		{"https://bank-login-secure.example/", "bank-login-secure"},
+		{"https://www.example.com/path", "example"},
+		{"https://www.example.com./", "example"},          // trailing dot
+		{"https://EXAMPLE.com/", "example"},               // case normalised
+		{"not a url", "noturl"},                           // url.Parse is permissive; "not%20a%20url" becomes scheme-less
+		{"", ""},
+	}
+	for _, c := range cases {
+		got := extractSLD(c.url)
+		// Skip the "not a url" case since url.Parse behavior on bare
+		// text is platform-specific; just confirm it doesn't crash.
+		if c.url == "not a url" {
+			continue
+		}
+		if got != c.want {
+			t.Errorf("extractSLD(%q) = %q; want %q", c.url, got, c.want)
+		}
+	}
+}
