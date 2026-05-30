@@ -1054,6 +1054,40 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ ok: true });
     return false;
   }
+  // v0.3.6 — Surface Shield server-side QR decode. Client-side jsQR
+  // hit a CORS-tainted canvas or couldn't decode; we fall back to
+  // verdict-api's /v1/decode-qr which fetches the image server-side
+  // and runs pyzbar. Returns { decoded: [string,...] }.
+  if (msg?.kind === "surface_decode_qr") {
+    const u = typeof msg.image_url === "string" ? msg.image_url : "";
+    if (!isHttpURL(u)) {
+      sendResponse({ decoded: [] });
+      return false;
+    }
+    (async () => {
+      try {
+        const cfg = await settings();
+        const apiBase = validateAPIBase(cfg.apiBase);
+        if (!apiBase) { sendResponse({ decoded: [] }); return; }
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 12000);
+        const r = await fetch(`${apiBase}/v1/decode-qr`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ image_url: u }),
+          signal: ctrl.signal,
+          cache: "no-store",
+        });
+        clearTimeout(t);
+        if (!r.ok) { sendResponse({ decoded: [] }); return; }
+        const j = await r.json();
+        sendResponse({ decoded: Array.isArray(j.decoded) ? j.decoded : [] });
+      } catch {
+        sendResponse({ decoded: [] });
+      }
+    })();
+    return true; // async
+  }
   // v0.3.6 — Surface Shield. Content script on a trusted-surface host
   // (chat.openai.com, claude.ai, gmail.com, slack.com, etc.) found a
   // rendered link/image/iframe pointing at a third-party URL and is

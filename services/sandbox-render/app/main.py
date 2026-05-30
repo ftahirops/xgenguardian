@@ -34,6 +34,12 @@ try:
 except ImportError:  # pragma: no cover — sandbox can run without OCR
     _OCR_AVAILABLE = False
 
+try:
+    from pyzbar.pyzbar import decode as _zbar_decode
+    _QR_AVAILABLE = True
+except ImportError:  # pragma: no cover — sandbox can run without QR
+    _QR_AVAILABLE = False
+
 from .challenge import detect_challenge
 from .dom_inventory import (
     _DOM_INVENTORY_JS,
@@ -327,6 +333,109 @@ class RenderResponse(BaseModel):
 @app.get("/healthz")
 async def healthz() -> dict[str, str]:
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# /decode-qr — fetch an image URL and decode any QR codes inside it.
+# Surface Shield (extension v0.3.6+) uses this as the server-side fallback
+# when client-side jsQR can't decode (heavy distortion, rotation, etc.).
+# Returns the list of decoded URLs/text. Bounded: max 5 MB image fetch,
+# 4 s pyzbar timeout, single-image input.
+# ---------------------------------------------------------------------------
+
+class DecodeQRRequest(BaseModel):
+    image_url: HttpUrl
+
+
+class DecodeQRResponse(BaseModel):
+    # decoded[] is the list of strings pyzbar extracted from the image.
+    # Each entry can be a URL, plain text, vCard payload, etc. Caller
+    # filters to URL-shaped strings and /v1/checks them.
+    decoded: list[str] = []
+    # Wall-clock for the decode pass (excluding image fetch).
+    decode_ms: int = 0
+    # Whether the image was fetched + parsed successfully. False on
+    # fetch error, non-image content-type, image-too-large, or parse
+    # failure. Callers treat False as "no signal", not "clean."
+    parsed:  bool = False
+    # Reason for parsed=False, for the operator log only. Never echoed
+    # back to the client surface (extension just sees decoded=[]).
+    reason:  str = ""
+
+
+_QR_IMAGE_MAX_BYTES = int(os.getenv("QR_IMAGE_MAX_BYTES", "5242880"))  # 5 MB
+_QR_DECODE_TIMEOUT_S = float(os.getenv("QR_DECODE_TIMEOUT_S", "4"))
+
+
+@app.post("/decode-qr", response_model=DecodeQRResponse)
+async def decode_qr(req: DecodeQRRequest) -> DecodeQRResponse:
+    if not _QR_AVAILABLE:
+        return DecodeQRResponse(parsed=False, reason="pyzbar not installed")
+    img_bytes = b""
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=2.0, read=4.0, write=2.0, pool=5.0),
+            follow_redirects=True,
+            max_redirects=3,
+        ) as client:
+            r = await client.get(str(req.image_url))
+            if r.status_code != 200:
+                return DecodeQRResponse(parsed=False, reason=f"http {r.status_code}")
+            ct = r.headers.get("content-type", "")
+            if ct and not ct.startswith("image/"):
+                return DecodeQRResponse(parsed=False, reason=f"non-image content-type: {ct[:32]}")
+            img_bytes = r.content
+            if len(img_bytes) > _QR_IMAGE_MAX_BYTES:
+                return DecodeQRResponse(
+                    parsed=False, reason=f"image too large: {len(img_bytes)} bytes",
+                )
+    except Exception as e:  # network, timeout, ssl, etc.
+        return DecodeQRResponse(parsed=False, reason=f"fetch error: {type(e).__name__}")
+
+    if not img_bytes:
+        return DecodeQRResponse(parsed=False, reason="empty image")
+
+    t0 = time.time()
+    try:
+        decoded = await asyncio.wait_for(
+            asyncio.to_thread(_decode_qr_bytes, img_bytes),
+            timeout=_QR_DECODE_TIMEOUT_S,
+        )
+    except asyncio.TimeoutError:
+        return DecodeQRResponse(
+            parsed=False, reason="decode timeout",
+            decode_ms=int((time.time() - t0) * 1000),
+        )
+    except Exception as e:
+        return DecodeQRResponse(parsed=False, reason=f"decode error: {type(e).__name__}")
+
+    return DecodeQRResponse(
+        decoded=decoded,
+        decode_ms=int((time.time() - t0) * 1000),
+        parsed=True,
+    )
+
+
+def _decode_qr_bytes(img_bytes: bytes) -> list[str]:
+    """Synchronous QR decode over image bytes. Runs in a thread.
+
+    pyzbar handles QR, Aztec, DataMatrix, PDF417 — we surface all
+    of them so attackers can't switch barcode formats to bypass.
+    Downscales very large images to bound CPU.
+    """
+    img = Image.open(io.BytesIO(img_bytes))
+    if img.width > 2000:
+        ratio = 2000 / img.width
+        img = img.resize((2000, int(img.height * ratio)), Image.BILINEAR)
+    out: list[str] = []
+    for d in _zbar_decode(img):
+        try:
+            text = d.data.decode("utf-8", errors="replace")
+        except Exception:
+            continue
+        if text:
+            out.append(text)
+    return out
 
 
 @app.post("/render", response_model=RenderResponse)

@@ -62,7 +62,7 @@
         "https://github.com/*",
         "https://gitlab.com/*"
       ],
-      "js": ["src/trusted-surfaces.js", "src/surface-shield.js"],
+      "js": ["src/trusted-surfaces.js", "src/vendor/jsqr.js", "src/surface-shield.js"],
       "run_at": "document_idle",
       "all_frames": false
     }

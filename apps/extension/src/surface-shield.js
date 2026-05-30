@@ -160,16 +160,131 @@
     const src = img.getAttribute("src") || img.currentSrc || "";
     if (!isHTTPUrl(src)) return;
     if (sameHost(src)) return;
-    // We don't BLOCK image rendering (would break legit content). We
-    // submit the image's host for verdict; on non-clean verdict, an
-    // overlay warning is drawn on top of the image so the user sees
-    // "this image was fetched from a suspicious host" before they
-    // trust whatever the image depicts (QR codes especially).
+    // Two parallel paths, both contribute to coverage:
+    //
+    //   1. HOST check — submit the image's host to /v1/check. If the
+    //      host is malicious / fresh-domain / on threat feeds, the
+    //      image gets a corner chip even if its content is innocuous.
+    //   2. QR content decode — try client-side jsQR first; if the
+    //      image is cross-origin (canvas taints), fall back to
+    //      server-side /v1/decode-qr. Any decoded URLs go through
+    //      /v1/check the same way a clicked link would.
     queue(src, (verdict) => {
+      if (verdict && (verdict.verdict || "").toUpperCase() !== "ALLOW" &&
+                     (verdict.verdict || "").toUpperCase() !== "CLEAN") {
+        annotateImage(img, verdict);
+      }
+    });
+    decodeAndVetQR(img);
+  }
+
+  // decodeAndVetQR — attempt QR decode (client-side first, server-side
+  // fallback) and route any decoded URLs through preVetLink-equivalent
+  // logic so they get the same badge + tooltip treatment as links would.
+  function decodeAndVetQR(img) {
+    waitForImageLoad(img).then((loaded) => {
+      if (!loaded) return;
+      const text = tryDecodeQRClientSide(img);
+      if (text && Array.isArray(text) && text.length > 0) {
+        for (const t of text) handleDecodedQRPayload(img, t);
+        return;
+      }
+      // Client-side failed (CORS-tainted canvas OR no QR found).
+      // Server-side fallback: ask /v1/decode-qr by image URL.
+      const src = img.getAttribute("src") || img.currentSrc || "";
+      if (!isHTTPUrl(src)) return;
+      decodeQRViaServer(src).then((decoded) => {
+        if (!Array.isArray(decoded)) return;
+        for (const t of decoded) handleDecodedQRPayload(img, t);
+      });
+    });
+  }
+
+  // tryDecodeQRClientSide — draw the image to a hidden canvas, get
+  // imageData, hand to jsQR. Returns [] if no QR found, or null if the
+  // canvas was tainted (cross-origin image without CORS headers) so
+  // the caller knows to try the server path.
+  function tryDecodeQRClientSide(img) {
+    if (typeof jsQR !== "function") return null;
+    if (!img.complete || !img.naturalWidth || !img.naturalHeight) return null;
+    try {
+      const canvas = document.createElement("canvas");
+      const w = Math.min(img.naturalWidth, 1024);
+      const h = Math.round(img.naturalHeight * (w / img.naturalWidth));
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, w, h);
+      let imageData;
+      try {
+        imageData = ctx.getImageData(0, 0, w, h);
+      } catch {
+        return null; // canvas tainted → caller goes to server
+      }
+      const result = jsQR(imageData.data, w, h, { inversionAttempts: "attemptBoth" });
+      return result && result.data ? [result.data] : [];
+    } catch {
+      return null;
+    }
+  }
+
+  function decodeQRViaServer(imageURL) {
+    return new Promise((resolve) => {
+      try {
+        chrome.runtime.sendMessage(
+          { kind: "surface_decode_qr", image_url: imageURL },
+          (resp) => {
+            if (chrome.runtime.lastError || !resp) {
+              resolve([]);
+              return;
+            }
+            resolve(resp.decoded || []);
+          },
+        );
+      } catch {
+        resolve([]);
+      }
+    });
+  }
+
+  function handleDecodedQRPayload(img, text) {
+    if (typeof text !== "string" || text.length === 0) return;
+    // Only act on URLs — vCards, plain text, raw IDs aren't actionable
+    // here. Try a permissive URL parse.
+    let url = null;
+    try {
+      const u = new URL(text.trim());
+      if (u.protocol === "http:" || u.protocol === "https:") {
+        url = u.toString();
+      }
+    } catch {
+      return;
+    }
+    if (!url) return;
+    queue(url, (verdict) => {
       if (!verdict) return;
       const v = (verdict.verdict || "").toUpperCase();
       if (v === "ALLOW" || v === "CLEAN") return;
-      annotateImage(img, verdict);
+      annotateQR(img, verdict, url);
+    });
+  }
+
+  function waitForImageLoad(img) {
+    return new Promise((resolve) => {
+      if (img.complete && img.naturalWidth > 0) {
+        resolve(true);
+        return;
+      }
+      const onLoad = () => { cleanup(); resolve(true); };
+      const onErr  = () => { cleanup(); resolve(false); };
+      const cleanup = () => {
+        img.removeEventListener("load", onLoad);
+        img.removeEventListener("error", onErr);
+      };
+      img.addEventListener("load", onLoad, { once: true });
+      img.addEventListener("error", onErr, { once: true });
+      // Defensive timeout — don't wait forever for a stuck image.
+      setTimeout(() => { cleanup(); resolve(img.complete && img.naturalWidth > 0); }, 6000);
     });
   }
 
@@ -307,6 +422,37 @@
     ].join(";");
     chip.title = tooltipFor(verdict) + "\n\n(If this image is a QR code, do NOT scan it with your phone.)";
     wrap.appendChild(chip);
+  }
+
+  function annotateQR(img, verdict, decodedURL) {
+    // Decorate the wrapping span (same as annotateImage) with an
+    // extra QR-specific overlay that says "QR points at <bad-host>".
+    // Make sure the wrap exists.
+    if (!img.parentElement || img.parentElement.getAttribute("data-xgg-wrap") !== "1") {
+      annotateImage(img, verdict); // creates the wrapper
+    }
+    const wrap = img.parentElement;
+    if (!wrap) return;
+    if (wrap.getAttribute("data-xgg-qr") === "1") return; // dedup
+    wrap.setAttribute("data-xgg-qr", "1");
+    const c = badgeColor(verdict);
+    let host = "";
+    try { host = new URL(decodedURL).hostname; } catch {}
+    const banner = document.createElement("div");
+    banner.textContent = "⚠ XGG QR " + c.label + " — " + (host || "unknown") + " (do NOT scan)";
+    banner.style.cssText = [
+      "display: block",
+      "margin-top: 4px",
+      "padding: 4px 8px",
+      "font: 700 11px ui-monospace, monospace",
+      "background: " + c.bg,
+      "color: " + c.fg,
+      "border-radius: 4px",
+      "max-width: 100%",
+      "word-break: break-all",
+    ].join(";");
+    banner.title = "QR payload: " + decodedURL + "\n\n" + tooltipFor(verdict);
+    wrap.appendChild(banner);
   }
 
   function annotateIframe(f, verdict) {

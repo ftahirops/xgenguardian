@@ -86,6 +86,11 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/check", s.rateLimitMiddleware(s.check))
 	mux.HandleFunc("/v1/rescan", s.rescan)
 	mux.HandleFunc("/v1/command-check", s.rateLimitMiddleware(s.commandCheck))
+	// v0.3.6 — Surface Shield QR decode. Server-side fallback when
+	// the extension's client-side jsQR can't decode (rotation, heavy
+	// distortion, multiple barcodes). Public, rate-limited like /v1/check
+	// because extensions call from arbitrary user networks.
+	mux.HandleFunc("/v1/decode-qr", s.rateLimitMiddleware(s.decodeQR))
 
 	// Phase G — opt-in data-flywheel endpoint. Rate-limited like /v1/check.
 	// Opt-in is enforced inside the handler (telemetryEnabled).
